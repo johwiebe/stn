@@ -33,13 +33,14 @@ class STN(object):
         self.C = {}                 # capacity of each task
         self.init = {}              # initial level
         self.price = {}             # prices of each state
-        self.products = set()
         
         # dictionary indexed by unit
         self.I = {}                 # sets of tasks performed by each unit
         self.O = {}                 # sets of operating modes in which each unit can operate
         self.tau = {}               # time taken to do maintenance for each unit
-        
+        self.a = {}                 # fixed maintenance cost for each unit
+        self.b = {}                 # maintenance discount for each unit
+ 
         # dictionaries indexed by (task,state)
         self.rho = {}               # input feed fractions
         self.rho_ = {}              # output product dispositions
@@ -96,7 +97,7 @@ class STN(object):
         self.P[(task,state)] = dur
 #        self.p[task] = max(self.p[task],dur)
         
-    def unit(self, unit, task, Bmin = 0, Bmax = float('inf'), cost = 0, vcost = 0, tm = 0, rmax = 0, rinit = 0):
+    def unit(self, unit, task, Bmin = 0, Bmax = float('inf'), cost = 0, vcost = 0, tm = 0, rmax = 0, rinit = 0, a = 0, b = 0):
         if unit not in self.units:
             self.units.add(unit)
             self.I[unit] = set()
@@ -104,6 +105,8 @@ class STN(object):
             self.tau[unit] = 0
             self.Rmax[unit] = 0
             self.Rinit[unit] = 0
+            self.a[unit] = 0
+            self.b[unit] = 0
         if task not in self.tasks:
             self.task(task)
         self.I[unit].add(task)
@@ -115,6 +118,8 @@ class STN(object):
         self.tau[unit] = max(tm, self.tau[unit])
         self.Rmax[unit] = max(rmax, self.Rmax[unit])
         self.Rinit[unit] = max(rinit, self.Rinit[unit])
+        self.a[unit] = max(a, self.a[unit])
+        self.b[unit] = max(b, self.b[unit])
     
     def opmode(self, opmode):
         if opmode not in self.opmodes:
@@ -130,8 +135,6 @@ class STN(object):
         self.changeoverTime[(task1,task2)] = dur
 
     def demand(self, state, time, Demand):
-        if state not in self.products:
-            self.products.add(state)
         self.Demand[state, time] = Demand
  
     def pprint(self):
@@ -279,9 +282,9 @@ class STN(object):
                 rhs += m.F[j,t]
                 m.cons.add(m.R[j,t] == rhs)
 
-    def solve(self, solver='glpk'):
+    def solve(self, solver='cplex'):
         self.solver = SolverFactory(solver)
-        self.solver.options['tmlim'] = 600
+#        self.solver.options['tmlim'] = 600
         self.solver.solve(self.model, tee=True).write()
 
     def gantt(self):

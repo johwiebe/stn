@@ -88,6 +88,6 @@ stn.demand('Product_2', 168, 200)
 H = 168
 dH = 3
 stn.build(range(0,H+1,dH))
-stn.solve('glpk')
+stn.solve('cplex')
 stn.gantt()
 stn.trace()
