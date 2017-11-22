@@ -18,8 +18,10 @@ class STN(object):
         self.tasks = set()          # set of task names
         self.units = set()          # set of unit names
         self.opmodes = set()        # set of operating mode names
-        self.TIME = []              # time grid
-        self.Demand = {}
+        self.TIMEs = []             # time grid scheduling
+        self.TIMEp = []             # time grid planning
+        self.Demand = {}            # demand for products
+        self.H = 0                  # planning time period
 
         # dictionaries indexed by task name
         self.S = {}                 # sets of states feeding each task (inputs)
@@ -167,54 +169,61 @@ class STN(object):
             print('        rho_:', self.rho_[(task,state)])
             print('           P:', self.P[(task,state)])
             
-    def build(self, TIME):
+    def build(self, TIMEs):
         
-        self.TIME = np.array([t for t in TIME])
-        self.H = max(self.TIME)
+        self.TIMEs = np.array([t for t in TIMEs])
+        self.H = max(self.TIMEs)
         self.model = ConcreteModel()
         m = self.model
         m.cons = ConstraintList()
         
         # W[i,j,k,t] 1 if task i starts in unit j and operating mode k at time t
-        m.W = Var(self.tasks, self.units, self.opmodes, self.TIME, domain=Boolean)
+        m.W = Var(self.tasks, self.units, self.opmodes, self.TIMEs, domain=Boolean)
+
+        # N[i,j,k,t] number of times task i starts on unit j in operating mode k in time period t
+        m.N = Var(self.task, self.units, self.opmodes, self.TIMEp, domain = Boolean)
 
         # M[j,t] 1 if unit j undergoes maintenance at time t
-        m.M = Var(self.units, self.TIME, domain=Boolean)
+        m.M = Var(self.units, self.TIMEs, domain=Boolean)
 
         # R[j,t] residual life time of unit j at time t
-        m.R = Var(self.units, self.TIME, domain=NonNegativeReals)
+        m.R = Var(self.units, self.TIMEs, domain=NonNegativeReals)
 
         # F[j,t] residual life restoration during maintenance
-        m.F = Var(self.units, self.TIME, domain=NonNegativeReals)
+        m.F = Var(self.units, self.TIMEs, domain=NonNegativeReals)
         
         # B[i,j,k,t] size of batch assigned to task i in unit j at time t
-        m.B = Var(self.tasks, self.units, self.opmodes, self.TIME, domain=NonNegativeReals)
+        m.B = Var(self.tasks, self.units, self.opmodes, self.TIMEs, domain=NonNegativeReals)
+
+        # A[i,j,t] total amount of material undergoing task i in unit j in planning time interval t
+        m.A = Var(self.tasks, self.units, self.TIMESp, domain=NonNegativeReals)
         
         # S[s,t] inventory of state s at time t
-        m.S = Var(self.states, self.TIME, domain=NonNegativeReals)
+        m.S = Var(self.states, self.TIMEs, domain=NonNegativeReals)
         
         # Q[j,t] inventory of unit j at time t
-        m.Q = Var(self.units, self.TIME, domain=NonNegativeReals)
+        m.Q = Var(self.units, self.TIMEs, domain=NonNegativeReals)
 
         # objectve
         m.Cost = Var(domain=NonNegativeReals)
         m.Value = Var(domain=NonNegativeReals)
         m.cons.add(m.Value == sum([self.price[s]*m.S[s,self.H] for s in self.states]))
         m.cons.add(m.Cost == sum([self.cost[(i,j)] * m.W[i,j,k,t] + self.vcost[(i,j)] * m.B[i,j,k,t]
-                                   for i in self.tasks for j in self.K[i] for k in self.O[j] for t in self.TIME])) 
+                                   for i in self.tasks for j in self.K[i] for k in self.O[j] for t in self.TIMEs])) 
         m.Obj = Objective(expr = m.Value - m.Cost, sense = maximize)
-        
+       
+        # scheduling horizon constraints 
         # unit constraints
         for j in self.units:
             rhs = 0
-            for t in self.TIME:
+            for t in self.TIMEs:
                 # a unit can only be allocated to one task 
                 lhs = 0
                 for i in self.I[j]:
                     for k in self.O[j]:
-                        for tprime in self.TIME[(self.TIME <= t) & (self.TIME >= t-self.p[i,j,k]+1)]:
+                        for tprime in self.TIMEs[(self.TIMEs <= t) & (self.TIMEs >= t-self.p[i,j,k]+1)]:
                             lhs += m.W[i,j,k,tprime]
-                    for tprime in self.TIME[(self.TIME <= t) & (self.TIME >= t-self.tau[j]+1)]:
+                    for tprime in self.TIMEs[(self.TIMEs <= t) & (self.TIMEs >= t-self.tau[j]+1)]:
                         lhs += m.M[j,tprime]
                 m.cons.add(lhs <= 1)
                 
@@ -229,16 +238,16 @@ class STN(object):
                 for i in self.I[j]:
                     for s in self.S_[i]:
                         if t >= self.P[(i,s)]:
-                            rhs -= self.rho_[(i,s)]*sum([m.B[i,j,k,max(self.TIME[self.TIME <= t-self.P[(i,s)]])] for k in self.O[j]])
+                            rhs -= self.rho_[(i,s)]*sum([m.B[i,j,k,max(self.TIMEs[self.TIMEs <= t-self.P[(i,s)]])] for k in self.O[j]])
                 m.cons.add(m.Q[j,t] == rhs)
                 rhs = m.Q[j,t]
                 
                 # switchover time constraints
                 for (i1,i2) in self.changeoverTime.keys():
                     if (i1 in self.I[j]) and (i2 in self.I[j]):
-                        for t1 in self.TIME[self.TIME <= (self.H - self.p[i1])]:
-                            for t2 in self.TIME[(self.TIME >= t1 + self.p[i1])
-                                            & (self.TIME < t1 + self.p[i1] + self.changeoverTime[(i1,i2)])]: 
+                        for t1 in self.TIMEs[self.TIMEs <= (self.H - self.p[i1])]:
+                            for t2 in self.TIMEs[(self.TIMEs >= t1 + self.p[i1])
+                                            & (self.TIMEs < t1 + self.p[i1] + self.changeoverTime[(i1,i2)])]: 
                                 m.cons.add(sum([m.W[i1,j,k,t1] for k in self.O[j]]) + sum([m.W[i2,j,k,t2] for k in self.O[k]]) <= 1)
 
                 
@@ -248,7 +257,7 @@ class STN(object):
         # state constraints
         for s in self.states:
             rhs = self.init[s]
-            for t in self.TIME:
+            for t in self.TIMEs:
                 # state capacity constraint
                 m.cons.add(m.S[s,t] <= self.C[s])
                 # state mass balanace
@@ -256,7 +265,7 @@ class STN(object):
                     for j in self.K[i]:
                         for k in self.O[j]:
                             if t >= self.P[(i,s)] + self.p[i,j,k]: 
-                                rhs += self.rho_[(i,s)]*m.B[i,j,k,max(self.TIME[self.TIME <= t-self.p[i,j,k]-self.P[(i,s)]])]             
+                                rhs += self.rho_[(i,s)]*m.B[i,j,k,max(self.TIMEs[self.TIMEs <= t-self.p[i,j,k]-self.P[(i,s)]])]             
                 for i in self.T[s]:
                     for j in self.K[i]:
                         for k in self.O[j]:
@@ -269,7 +278,7 @@ class STN(object):
         # residual life constraints 
         for j in self.units:
             rhs = self.Rinit[j]
-            for t in self.TIME:
+            for t in self.TIMEs:
                 # constraints on F[j,t] and R[j,t]
                 m.cons.add(m.F[j,t] <= self.Rmax[j]*m.M[j,t])
                 m.cons.add(m.F[j,t] <= self.Rmax[j] - rhs)
@@ -281,6 +290,62 @@ class STN(object):
                         rhs -= self.D[i,j,k]*m.W[i,j,k,t]
                 rhs += m.F[j,t]
                 m.cons.add(m.R[j,t] == rhs)
+
+        # planning horizon constraints
+        # unit constraints
+        for j in self.units:
+            rhs = 0
+            for t in self.TIMEp:
+                # a unit can only be allocated to one task 
+                lhs = 0
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        lhs += m.W[i,j,k,t]*self.p[i,j,k]
+                lhs += m.M[j,t]*self.tau[j]
+                m.cons.add(lhs <= self.H)
+
+                # capacity constraints (see Konkili, Sec. 3.1.2)
+                for i in self.I[j]:
+                    m.cons.add(sum([m.N[i,j,k,t] for k in self.O[j]])*self.Bmin[i,j] <= m.A[i,j,t])
+                    m.cons.add(m.A[i,j,t] <= sum([m.N[i,j,k,t] for k in self.O[j]])*self.Bmax[i,j])
+                
+                # operating mode constraints
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        m.cons.add(m.N[i,j,k,t] <= self.U*m.Mode[j,k,t])
+                m.cons.add(sum([m.Mode[j,k,t] for k in self.O[j]]) == 1)
+
+        # state constraints
+        for s in self.states:
+            rhs = self.init[s] # FIX!!
+            for t in self.TIMEp:
+                # state capacity constraint
+                m.cons.add(m.S[s,t] <= self.C[s])
+                # state mass balanace
+                for i in self.T_[s]:
+                    for j in self.K[i]:
+                        rhs += self.rho_[(i,s)]*m.A[i,j,t]             
+                for i in self.T[s]:
+                    for j in self.K[i]:
+                        rhs -= self.rho[(i,s)]*m.A[i,j,t]
+                if (s,t) in self.Demand:
+                    rhs -= self.Demand[s,t]
+                m.cons.add(m.S[s,t] == rhs)
+                rhs = m.S[s,t]
+
+        # residual life constraints
+        for j in self.units:
+            rhs = self.Rinit[j] # FIX!!
+            for t in self.TIMEp:
+                # residual life balance
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        rhs -= self.D[i,j,k]*m.N[i,j,k,t]
+                rhs += m.F[j,t]
+                m.cons.add(m.R[j,t] == rhs)
+                # constraints on R and F
+                m.cons.add(0 <= m.R[j,t] <= self.Rmax[j])
+
 
     def solve(self, solver='cplex'):
         self.solver = SolverFactory(solver)
@@ -301,11 +366,11 @@ class STN(object):
         ticks = []
         
         for s in self.states:
-            plt.plot(self.TIME, [self.model.S[s,t]() for t in self.TIME])
+            plt.plot(self.TIMEs, [self.model.S[s,t]() for t in self.TIMEs])
             plt.show()
 
         #for j in self.units:
-        #    plt.plot(self.TIME, [self.model.M[j,t]() for t in self.TIME])
+        #    plt.plot(self.TIMEs, [self.model.M[j,t]() for t in self.TIMEs])
         #    plt.show()
         
         # create a list of units sorted by time of first assignment
@@ -313,7 +378,7 @@ class STN(object):
         for j in self.units:
             for i in I[j]:
                 for k in O[j]: 
-                    for t in self.TIME:
+                    for t in self.TIMEs:
                         #print(self.model.W[i,j,k,t]())
                         if self.model.W[i,j,k,t]() > 0:
                             jstart[j] = min(jstart[j],t)
@@ -337,7 +402,7 @@ class STN(object):
                 ticks.append(idx)
                 lbls.append("{0:s} -> {1:s}".format(j,i))
                 plt.plot([0,H],[idx,idx],lw=24,alpha=.3,color='y')
-                for t in self.TIME:
+                for t in self.TIMEs:
                     for k in O[j]:
                         if model.W[i,j,k,t]() > 0:
                             plt.plot([t,t+p[i,j,k]], [idx,idx],'k', lw=24, alpha=0.5, solid_capstyle='butt')
@@ -354,8 +419,8 @@ class STN(object):
     def trace(self):
         # abbreviations
         model = self.model
-        TIME = self.TIME
-        dT = np.mean(np.diff(TIME))
+        TIMEs = self.TIMEs
+        dT = np.mean(np.diff(TIMEs))
         
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")            
@@ -367,7 +432,7 @@ class STN(object):
         # t2go[j]['t'] is the time to go on equipment j
         time2go = {j:{'assignment':'None', 't':0} for j in self.units}
         
-        for t in TIME:
+        for t in TIMEs:
             print("\nTime =",t,"hr")
             
             # create list of instructions
@@ -381,7 +446,7 @@ class STN(object):
                     for s in self.S_[i]:
                         ts = t-self.P[(i,s)]
                         if ts >= 0:
-                            amt = self.rho_[(i,s)] * model.B[i,j, max(TIME[TIME <= ts])]()
+                            amt = self.rho_[(i,s)] * model.B[i,j, max(TIMEs[TIMEs <= ts])]()
                             if amt > 0:
                                 strList.append(fmt.format(amt,j,s))
                                 
@@ -390,7 +455,7 @@ class STN(object):
                 fmt = 'Release {0:s} from {1:s}'
                 for i in self.I[j]:
                     if t-self.p[i] >= 0:
-                        if model.W[i,j,max(TIME[TIME <= t-self.p[i]])]() > 0:
+                        if model.W[i,j,max(TIMEs[TIMEs <= t-self.p[i]])]() > 0:
                             strList.append(fmt.format(j,i))
                             time2go[j]['assignment'] = 'None'
                             time2go[j]['t'] = 0
