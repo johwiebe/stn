@@ -17,12 +17,12 @@ stn = STN()
 stn.state('FeedA',     init = 2000000)
 stn.state('FeedB',     init = 2000000)
 stn.state('FeedC',     init = 2000000)
-stn.state('HotA',      price = -1, capacity = 100)
-stn.state('IntAB',     price = -1, capacity = 200)
-stn.state('IntBC',     price = -1, capacity = 150)
-stn.state('ImpureE',   price = -1, capacity = 100)
-stn.state('Product_1', price = 10)
-stn.state('Product_2', price = 10)
+stn.state('HotA',      price = -1, capacity = 100, scost = 1)
+stn.state('IntAB',     price = -1, capacity = 200, scost = 1)
+stn.state('IntBC',     price = -1, capacity = 150, scost = 1)
+stn.state('ImpureE',   price = -1, capacity = 100, scost = 1)
+stn.state('Product_1', price = 10, scost = 5)
+stn.state('Product_2', price = 10, scost = 5)
 
 # state to task arcs
 stn.stArc('FeedA',   'Heating')
@@ -35,23 +35,27 @@ stn.stArc('IntBC',   'Reaction_2', rho = 0.6)
 stn.stArc('ImpureE', 'Separation')
 
 # task to state arcs
-stn.tsArc('Heating',    'HotA',      rho = 1.0, dur = 1)
-stn.tsArc('Reaction_2', 'IntAB',     rho = 0.6, dur = 2)
-stn.tsArc('Reaction_2', 'Product_1', rho = 0.4, dur = 2)
-stn.tsArc('Reaction_1', 'IntBC',     dur = 2)
-stn.tsArc('Reaction_3', 'ImpureE',   dur = 1)
-stn.tsArc('Separation', 'IntAB',     rho = 0.1, dur = 2)
-stn.tsArc('Separation', 'Product_2', rho = 0.9, dur = 1)
+stn.tsArc('Heating',    'HotA',      rho = 1.0)
+stn.tsArc('Reaction_2', 'IntAB',     rho = 0.6)
+stn.tsArc('Reaction_2', 'Product_1', rho = 0.4)
+stn.tsArc('Reaction_1', 'IntBC')
+stn.tsArc('Reaction_3', 'ImpureE')
+stn.tsArc('Separation', 'IntAB',     rho = 0.1)
+stn.tsArc('Separation', 'Product_2', rho = 0.9)
 
 # unit-task data
-stn.unit('Heater',    'Heating',    Bmin = 40, Bmax = 100, tm = 15, rmax = 80, rinit = 30)
-stn.unit('Reactor_1', 'Reaction_1', Bmin = 32, Bmax =  80, tm = 21, rmax = 150, rinit = 50)
+stn.unit('Heater',    'Heating',    Bmin = 40, Bmax = 100, tm = 15, rmax = 80,
+         rinit = 30, a = 2, b =1)
+stn.unit('Reactor_1', 'Reaction_1', Bmin = 32, Bmax =  80, tm = 21, rmax = 150,
+         rinit = 50, a = 5, b =2)
 stn.unit('Reactor_1', 'Reaction_2', Bmin = 32, Bmax =  80, tm = 21)
 stn.unit('Reactor_1', 'Reaction_3', Bmin = 32, Bmax =  80, tm = 21)
-stn.unit('Reactor_2', 'Reaction_1', Bmin = 20, Bmax =  50, tm = 24, rmax = 160, rinit = 120)
+stn.unit('Reactor_2', 'Reaction_1', Bmin = 20, Bmax =  50, tm = 24, rmax = 160,
+         rinit = 120, a = 5, b =3)
 stn.unit('Reactor_2', 'Reaction_2', Bmin = 20, Bmax =  50, tm = 24)
 stn.unit('Reactor_2', 'Reaction_3', Bmin = 20, Bmax =  50, tm = 24)
-stn.unit('Still',     'Separation', Bmin = 80, Bmax = 200, tm = 15, rmax = 100, rinit = 40)
+stn.unit('Still',     'Separation', Bmin = 80, Bmax = 200, tm = 15, rmax = 100,
+         rinit = 40, a = 9, b = 5)
 
 stn.opmode('Slow')
 stn.opmode('Normal')
@@ -82,14 +86,26 @@ stn.ijkdata('Separation', 'Still', 'Slow', 15, 2)
 stn.ijkdata('Separation', 'Still', 'Normal', 9, 5)
 stn.ijkdata('Separation', 'Still', 'Fast', 6, 6)
 
-stn.demand('Product_1', 168, 150)
-stn.demand('Product_2', 168, 200) 
+demand_1 = [150, 88, 125, 67, 166, 203, 90, 224, 174, 126, 66, 119, 234, 64,
+            103, 77, 132, 186, 174, 239, 124, 194, 91, 228]
+demand_2 = [200, 150, 197, 296, 191, 193, 214, 294, 247, 313, 226, 121, 197,
+            242, 220, 342, 355, 320, 335, 298, 252, 222, 324, 337]
 
-Hs = 168
-dHs = 3
-Hp = 24
-dHp = 1
-stn.build(range(0,Hs+1,dHs),range(0,Hp+1,dHp))
+Ts = 168
+dTs = 3
+Tp = 168*24
+dTp = 168
+TIMEs = range(0,Ts,dTs)
+TIMEp = range(Ts,Tp,dTp)
+
+stn.demand('Product_1', Ts-dTs, demand_1[0])
+stn.demand('Product_2', Ts-dTs, demand_2[0])
+
+for i in range(0,len(TIMEp)):
+    stn.demand('Product_1', TIMEp[i], demand_1[i+1])
+    stn.demand('Product_2', TIMEp[i], demand_2[i+1])
+
+stn.build(TIMEs,TIMEp)
 stn.solve('cplex')
 stn.gantt()
 stn.trace()

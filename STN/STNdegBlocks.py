@@ -5,7 +5,6 @@ Created on Sat Oct  7 17:42:12 2017
 
 @author: jeff
 """
-
 from pyomo.environ import *
 import matplotlib.pyplot as plt
 import numpy as np
@@ -69,13 +68,15 @@ class STN(object):
         self.changeoverTime = {}        # switch over times required for task1 -> task2
 
     # defines states as .state(name, capacity, init)
-    def state(self, name, capacity = float('inf'), init = 0, price = 0,):
+    def state(self, name, capacity = float('inf'), init = 0, price = 0, scost =
+            0):
         self.states.add(name)       # add to the set of states
         self.C[name] = capacity     # state capacity
         self.init[name] = init      # state initial value
         self.T[name] = set()        # tasks which feed this state (inputs)
         self.T_[name] = set()       # tasks fed from this state (outputs)
         self.price[name] = price    # per unit price of each state
+        self.scost[name] = scost    # storage cost per (planning) interval
 
     def task(self, name):
         self.tasks.add(name)        # add to set of tasks
@@ -89,11 +90,11 @@ class STN(object):
             self.state(state)
         if task not in self.tasks:
             self.task(task)
-        self.S[task].add(state)  
+        self.S[task].add(state)
         self.rho[(task,state)] = rho
         self.T[state].add(task)
         
-    def tsArc(self, task, state, rho=1, dur=1):
+    def tsArc(self, task, state, rho=1, dur=0):
         if state not in self.states:
             self.state(state)
         if task not in self.tasks:
@@ -299,7 +300,6 @@ class STN(object):
             b.T = self.Tp
             b.dT = self.dTp
             m = b.parent_block()
-            import ipdb; ipdb.set_trace()
             
             # N[i,j,k,t] number of times task i starts on unit j in operating mode k in time period t
             b.N = Var(self.tasks, self.units, self.opmodes, b.TIME, domain = Boolean)
@@ -362,14 +362,14 @@ class STN(object):
                     for i in self.T[s]:
                         for j in self.K[i]:
                             rhs -= self.rho[(i,s)]*b.A[i,j,t]
-                    if (s,t) in self.Demand:
-                        rhs -= self.Demand[s,t]
+                    if ((s,t+b.dT) in self.Demand):
+                        rhs -= self.Demand[s,t+b.dT]
                     b.cons.add(b.S[s,t] == rhs)
                     rhs = b.S[s,t]
 
             # residual life constraints
             for j in self.units:
-                rhs = m.Rtransfer[j] 
+                rhs = m.Rtransfer[j]
                 for t in b.TIME:
                     # residual life balance
                     for i in self.I[j]:
@@ -399,7 +399,7 @@ class STN(object):
                         rhs += self.rho_[(i,s)]*m.sb.B[i,j,k,self.Ts + self.dTs
                                 - self.p[i,j,k]]
             if (s,self.Ts) in self.Demand:
-                self.Demand[s,self.Ts]
+                rhs -= self.Demand[s,self.Ts]
             m.cons.add(m.Sfin[s] == rhs)
             m.cons.add(0 <= m.Sfin[s] <= self.C[s])
             for i in self.T_[s]:
@@ -435,7 +435,7 @@ class STN(object):
 
         costStorage = 0
         for s in self.states:
-            costStorage += self.scost[s]*(Sfin[s] + sum([m.pb.S[s,t] for t in
+            costStorage += self.scost[s]*(m.Sfin[s] + sum([m.pb.S[s,t] for t in
                 self.TIMEp]))
         m.cons.add(m.CostStorage == costStorage)
 
@@ -457,16 +457,15 @@ class STN(object):
         m.cons.add(m.CostMaintenance == costMaintenance)
         m.cons.add(m.CostWear == costWear)
 
-        
-        m.cons.add(m.Value == sum([self.price[s]*m.sb.S[s,self.Ts] for s in self.states]))
-        m.cons.add(m.Cost == sum([self.cost[(i,j)] * m.sb.W[i,j,k,t] + self.vcost[(i,j)] * m.sb.B[i,j,k,t]
-                                   for i in self.tasks for j in self.K[i] for k in self.O[j] for t in self.TIMEs]))
-        m.Obj = Objective(expr = m.Value - m.Cost, sense = maximize)
+        m.Obj = Objective(expr = m.CostStorage + m.CostMaintenance +
+                         m.CostWear, sense = minimize)
+        # m.Obj = Objective(expr = m.CostStorage + m.CostMaintenance, sense =
+        #                   minimize)
 
 
     def solve(self, solver='cplex'):
         self.solver = SolverFactory(solver)
-#        self.solver.options['tmlim'] = 600
+        self.solver.options['timelimit'] = 60
         self.solver.solve(self.model, tee=True).write()
 
     def gantt(self):
@@ -477,30 +476,27 @@ class STN(object):
         p = self.p
         O = self.O
 
-        import ipdb; ipdb.set_trace()
         gap = H/400
         idx = 1
         lbls = []
         ticks = []
         
-        for s in self.states:
-            plt.plot(self.TIMEs, [self.model.sb.S[s,t]() for t in self.TIMEs])
-            plt.show()
+        # for s in self.states:
+        #     plt.plot(self.TIMEs, [self.model.sb.S[s,t]() for t in self.TIMEs])
+        #     plt.title(s)
+        #     plt.show()
 
-        #for j in self.units:
-        #    plt.plot(self.TIMEs, [self.model.M[j,t]() for t in self.TIMEs])
-        #    plt.show()
         
         # create a list of units sorted by time of first assignment
         jstart = {j:H+1 for j in self.units}
         for j in self.units:
             for i in I[j]:
-                for k in O[j]: 
+                for k in O[j]:
                     for t in self.TIMEs:
                         #print(self.model.W[i,j,k,t]())
                         if self.model.sb.W[i,j,k,t]() > 0:
                             jstart[j] = min(jstart[j],t)
-        jsorted = [j for (j,t) in sorted(jstart.items(), key=lambda x: x[1])]
+        jsorted = self.units #[j for (j,t) in sorted(jstart.items(), key=lambda x: x[1])]
 
         # number of horizontal bars to draw
         nbars = -1
@@ -533,12 +529,26 @@ class STN(object):
         plt.gca().set_yticks(ticks)
         plt.gca().set_yticklabels(lbls);
         plt.show();
+        
+       # for j in self.units:
+       #     plt.plot(self.TIMEs, [model.sb.R[j,t]() for t in self.TIMEs])
+       #     plt.title(j)
+       #     plt.show()
+
+        for s in self.states:
+            plt.plot(self.TIMEp, [model.pb.S[s,t]() for t in self.TIMEp])
+            plt.title(s)
+            plt.show()
 
     def trace(self):
         # abbreviations
         model = self.model
         TIMEs = self.TIMEs
-        dT = np.mean(np.diff(TIMEs))
+        TIMEp = self.TIMEp
+        dTs = self.dTs
+        dTp = self.dTp
+        Ts = self.Ts
+        Tp = self.Tp
         
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")
@@ -556,44 +566,50 @@ class STN(object):
             # create list of instructions
             strList = []
             
-            # first unload units 
+            # first unload units
             for j in self.units:
-                time2go[j]['t'] -= dT
+                time2go[j]['t'] -= dTs
                 fmt = 'Transfer {0:.2f} kg from {1:s} to {2:s}'
-                for i in self.I[j]:  
+                for i in self.I[j]:
                     for s in self.S_[i]:
-                        ts = t-self.P[(i,s)]
-                        if ts >= 0:
-                            amt = self.rho_[(i,s)] * model.B[i,j, max(TIMEs[TIMEs <= ts])]()
-                            if amt > 0:
-                                strList.append(fmt.format(amt,j,s))
+                        for k in self.O[j]:
+                            ts = t-self.p[i,j,k]
+                            if ts >= 0:
+                                amt = self.rho_[(i,s)] * model.sb.B[i,j,k, max(TIMEs[TIMEs <= ts])]()
+                                if amt > 0:
+                                    strList.append(fmt.format(amt,j,s))
                                 
             for j in self.units:
                 # release units from tasks
                 fmt = 'Release {0:s} from {1:s}'
                 for i in self.I[j]:
-                    if t-self.p[i] >= 0:
-                        if model.W[i,j,max(TIMEs[TIMEs <= t-self.p[i]])]() > 0:
-                            strList.append(fmt.format(j,i))
-                            time2go[j]['assignment'] = 'None'
-                            time2go[j]['t'] = 0
+                    for k in self.O[j]:
+                        if t-self.p[i,j,k] >= 0:
+                            if model.sb.W[i,j,k,max(TIMEs[TIMEs <=
+                                                          t-self.p[i,j,k]])]() > 0:
+                                strList.append(fmt.format(j,i))
+                                time2go[j]['assignment'] = 'None'
+                                time2go[j]['t'] = 0
                             
                 # assign units to tasks
-                fmt = 'Assign {0:s} to {1:s} for {2:.2f} kg batch for {3:.1f} hours'
+                fmt = ('Assign {0:s} to {1:s} for {2:.2f} kg batch for {3:.1f}'
+                       'hours (Mode: {4:s})')
                 for i in self.I[j]:
-                    amt = model.B[i,j,t]()
-                    if amt > 0:
-                        strList.append(fmt.format(j,i,amt,self.p[i]))
-                        time2go[j]['assignment'] = i
-                        time2go[j]['t'] = self.p[i]
+                    for k in self.O[j]:
+                       amt = model.sb.B[i,j,k,t]()
+                       if amt > 0:
+                           strList.append(fmt.format(j,i,amt,self.p[i,j,k],k))
+                           time2go[j]['assignment'] = i
+                           time2go[j]['t'] = self.p[i,j,k]
                         
                 # transfer from states to tasks/units
                 fmt = 'Transfer {0:.2f} from {1:s} to {2:s}'
                 for i in self.I[j]:
-                    for s in self.S[i]:
-                        amt = self.rho[(i,s)] * model.B[i,j,t]()
-                        if amt > 0:
-                            strList.append(fmt.format(amt, s, j))
+                    for k in self.O[j]:
+                        for s in self.S[i]:
+                            amt = self.rho[(i,s)] * model.sb.B[i,j,k,t]()
+                            if amt > 0:
+                                strList.append(fmt.format(amt, s, j))
 
             if len(strList) > 0:
                 print()
@@ -604,13 +620,14 @@ class STN(object):
                     
             print("\n    State Inventories are now:")
             for s in self.states:
-                print("        {0:10s}  {1:6.1f} kg".format(s,model.S[s,t]()))
+                print("        {0:10s}  {1:6.1f} kg".format(s,model.sb.S[s,t]()))
             
-            print('\n    Unit Assignments are now:')
+            import ipdb; ipdb.set_trace()
+            # print('\n    Unit Assignments are now:')
             fmt = '        {0:s}: {1:s}, {2:.2f} kg, {3:.1f} hours to go.'
-            for j in self.units:
-                if time2go[j]['assignment'] != 'None':
-                    print(fmt.format(j, time2go[j]['assignment'], 
-                                     model.Q[j,t](), time2go[j]['t']))
-                else:
-                    print('        {0:s} is unassigned'.format(j))
+            # for j in self.units:
+            #     if time2go[j]['assignment'] != 'None':
+            #         print(fmt.format(j, time2go[j]['assignment'],
+            #                          model.Q[j,t](), time2go[j]['t']))
+            #     else:
+            #         print('        {0:s} is unassigned'.format(j))
