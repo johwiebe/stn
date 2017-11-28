@@ -8,6 +8,8 @@ Created on Sat Oct  7 17:42:12 2017
 from pyomo.environ import *
 import matplotlib.pyplot as plt
 import numpy as np
+import dill
+import sys
 
 class STN(object):
     def __init__(self):
@@ -195,7 +197,7 @@ class STN(object):
             b.dT = self.dTs
 
             # W[i,j,k,t] 1 if task i starts in unit j and operating mode k at time t
-            b.W = Var(self.tasks, self.units, self.opmodes, b.TIME, domain=Boolean)
+            b.W = Var(self.tasks, self.units, self.opmodes, b.TIME, domain=Binary)
 
             # M[j,t] 1 if unit j undergoes maintenance at time t
             b.M = Var(self.units, b.TIME, domain=Boolean)
@@ -302,7 +304,8 @@ class STN(object):
             m = b.parent_block()
             
             # N[i,j,k,t] number of times task i starts on unit j in operating mode k in time period t
-            b.N = Var(self.tasks, self.units, self.opmodes, b.TIME, domain = Boolean)
+            b.N = Var(self.tasks, self.units, self.opmodes, b.TIME,
+                      domain=NonNegativeIntegers)
 
             # M[j,t] 1 if unit j undergoes maintenance at time t
             b.M = Var(self.units, b.TIME, domain=Boolean)
@@ -323,7 +326,7 @@ class STN(object):
             b.Q = Var(self.units, b.TIME, domain=NonNegativeReals)
 
             # Mode[j,k,t] 1 if unit j operates in operating mode k at time t
-            b.Mode = Var(self.units, self.opmodes, b.TIME)
+            b.Mode = Var(self.units, self.opmodes, b.TIME, domain=Binary)
 
             # planning horizon constraints
             # unit constraints
@@ -362,8 +365,8 @@ class STN(object):
                     for i in self.T[s]:
                         for j in self.K[i]:
                             rhs -= self.rho[(i,s)]*b.A[i,j,t]
-                    if ((s,t+b.dT) in self.Demand):
-                        rhs -= self.Demand[s,t+b.dT]
+                    if ((s,t) in self.Demand):
+                        rhs -= self.Demand[s,t]
                     b.cons.add(b.S[s,t] == rhs)
                     rhs = b.S[s,t]
 
@@ -465,13 +468,25 @@ class STN(object):
 
     def solve(self, solver='cplex'):
         self.solver = SolverFactory(solver)
-        self.solver.options['timelimit'] = 60
-        self.solver.solve(self.model, tee=True).write()
+        self.solver.options['timelimit'] = 10000
+        self.solver.solve(self.model,
+                          tee=True,
+                          logfile="STN.log").write()
+        with open('output.txt', 'w') as f:
+            f.write("STN Output:")
+            self.model.display(ostream=f)
+        with open('STN.pyomo', 'wb') as dill_file:
+            dill.dump(self.model, dill_file)
+    
+    def loadres(self, f="STN.pyomo"):
+        with open(f, 'rb') as dill_file:
+            self.model = dill.load(dill_file)
 
     def gantt(self):
         model = self.model
         C = self.C
         H = self.Ts
+        Tp = self.Tp
         I = self.I
         p = self.p
         O = self.O
@@ -496,7 +511,7 @@ class STN(object):
                         #print(self.model.W[i,j,k,t]())
                         if self.model.sb.W[i,j,k,t]() > 0:
                             jstart[j] = min(jstart[j],t)
-        jsorted = self.units #[j for (j,t) in sorted(jstart.items(), key=lambda x: x[1])]
+        jsorted = [j for (j,t) in sorted(jstart.items(), key=lambda x: x[1])]
 
         # number of horizontal bars to draw
         nbars = -1
@@ -518,27 +533,67 @@ class STN(object):
                 plt.plot([0,H],[idx,idx],lw=24,alpha=.3,color='y')
                 for t in self.TIMEs:
                     for k in O[j]:
-                        if model.sb.W[i,j,k,t]() > 0:
+                        if model.sb.W[i,j,k,t]() > 0.5:
                             plt.plot([t,t+p[i,j,k]], [idx,idx],'k', lw=24, alpha=0.5, solid_capstyle='butt')
                             plt.plot([t+gap,t+p[i,j,k]-gap], [idx,idx],'b', lw=20, solid_capstyle='butt')
                             txt = "{0:.2f}".format(model.sb.B[i,j,k,t]())
                             col = {'Slow': 'green', 'Normal': 'yellow', 'Fast': 'red'}
-                            plt.text(t+p[i]/2, idx, txt, color=col[k], weight='bold', ha='center', va='center')
+                            plt.text(t+p[i,j,k]/2, idx, txt, color=col[k], weight='bold', ha='center', va='center')
         plt.xlim(0,self.Ts)
         plt.ylim(-nbars-0.5,0)
         plt.gca().set_yticks(ticks)
         plt.gca().set_yticklabels(lbls);
-        plt.show();
+        #plt.show();
+        plt.savefig('gantt_scheduling.png')
         
+        idx = 1
+        plt.figure(figsize=(12,(nbars+1)/2))
+
+        for j in jsorted:
+            idx -= 0.5
+            for i in sorted(I[j]):
+                idx -= 1
+                import ipdb; ipdb.set_trace()
+                ticks.append(idx)
+                lbls.append("{0:s} -> {1:s}".format(j,i))
+                plt.plot([0,Tp],[idx,idx],lw=24,alpha=.3,color='y')
+                for t in self.TIMEp:
+                    if model.pb.N[i,j,k,t]() > 0:
+                        plt.plot([t,t+p[i,j,k]*sum([model.pb.N[i,j,k,t]() for k
+                                                    in self.O[j]])],
+                                 [idx,idx],'k', lw=24, alpha=0.5, solid_capstyle='butt')
+                        plt.plot([t+gap,t+p[i,j,k]*sum([model.pb.N[i,j,k,t]()
+                                                        for k in
+                                                        self.O[j]])-gap],
+                                 [idx,idx],'b', lw=20, solid_capstyle='butt')
+                        txt = "{0:.2f}".format(model.pb.A[i,j,t]())
+                        col = {'Slow': 'green', 'Normal': 'yellow', 'Fast': 'red'}
+                        plt.text(t+p[i,j,k]/2, idx, txt, color=col[k], weight='bold', ha='center', va='center')
+        plt.xlim(0,self.Tp)
+        plt.ylim(-nbars-0.5,0)
+        plt.gca().set_yticks(ticks)
+        plt.gca().set_yticklabels(lbls);
+        plt.show();
+        plt.savefig('gannt_planning.png')
+        import ipdb; ipdb.set_trace()
+
        # for j in self.units:
        #     plt.plot(self.TIMEs, [model.sb.R[j,t]() for t in self.TIMEs])
        #     plt.title(j)
        #     plt.show()
 
         for s in self.states:
-            plt.plot(self.TIMEp, [model.pb.S[s,t]() for t in self.TIMEp])
+            plt.figure()
+            plt.bar(self.TIMEp/168+1, [model.pb.S[s,t]() for t in self.TIMEp])
             plt.title(s)
-            plt.show()
+            #if (s,self.Tp) in self.Demand:
+            #    plt.bar(self.TIMEp/168, [self.Demand[s,t] for t in self.TIMEp])
+            plt.bar(self.TIMEp/168+1, [20*model.pb.M['Reactor_1',t]() for t in
+                                  self.TIMEp])
+            plt.bar(self.TIMEp/168+1, [10*model.pb.M['Reactor_2',t]() for t in
+                                  self.TIMEp])
+            #plt.show()
+            plt.savefig(s+'.png')
 
     def trace(self):
         # abbreviations
@@ -549,7 +604,9 @@ class STN(object):
         dTp = self.dTp
         Ts = self.Ts
         Tp = self.Tp
-        
+       
+        oldstdout = sys.stdout
+        sys.stdout = open('trace.txt', 'w')
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")
         for s in self.states:
@@ -597,7 +654,7 @@ class STN(object):
                 for i in self.I[j]:
                     for k in self.O[j]:
                        amt = model.sb.B[i,j,k,t]()
-                       if amt > 0:
+                       if model.sb.W[i,j,k,t]() > 0:
                            strList.append(fmt.format(j,i,amt,self.p[i,j,k],k))
                            time2go[j]['assignment'] = i
                            time2go[j]['t'] = self.p[i,j,k]
@@ -622,7 +679,6 @@ class STN(object):
             for s in self.states:
                 print("        {0:10s}  {1:6.1f} kg".format(s,model.sb.S[s,t]()))
             
-            import ipdb; ipdb.set_trace()
             # print('\n    Unit Assignments are now:')
             fmt = '        {0:s}: {1:s}, {2:.2f} kg, {3:.1f} hours to go.'
             # for j in self.units:
@@ -631,3 +687,70 @@ class STN(object):
             #                          model.Q[j,t](), time2go[j]['t']))
             #     else:
             #         print('        {0:s} is unassigned'.format(j))
+
+        sys.stdout = oldstdout
+
+    def trace_planning(self):
+        # abbreviations
+        model = self.model
+        TIMEs = self.TIMEs
+        TIMEp = self.TIMEp
+        dTs = self.dTs
+        dTp = self.dTp
+        Ts = self.Ts
+        Tp = self.Tp
+        
+        oldstdout = sys.stdout
+        sys.stdout = open('trace_planning.txt', 'w')
+        print("\nStarting Conditions")
+        print("\n    Initial State Inventories are:")
+        for s in self.states:
+            print("        {0:10s}  {1:6.1f} kg".format(s,model.Sfin[s]()))
+        
+        # for tracking unit assignments
+        # t2go[j]['assignment'] contains the task to which unit j is currently assigned
+        # t2go[j]['t'] is the time to go on equipment j
+        time2go = {j:{'assignment':'None', 't':0} for j in self.units}
+        
+        for t in TIMEp:
+            print("\nTime =",t,"hr")
+            
+            # create list of instructions
+            strList = []
+            
+            for j in self.units:
+                # assign units to tasks
+                fmt = ('Assign {0:s} to {1:s} for {2:.0f} batches (Amount: {3:.1f}'
+                       'kg, Mode: {4:s})')
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        amt = model.pb.A[i,j,t]()
+                        if model.pb.N[i,j,k,t]() > 0.5:
+                            strList.append(fmt.format(j,i,model.pb.N[i,j,k,t](),amt,k))
+                            time2go[j]['assignment'] = i
+                            time2go[j]['t'] = self.p[i,j,k]
+            
+            if len(strList) > 0:
+                print()
+                idx = 0
+                for str in strList:
+                    idx += 1
+                    print('   {0:2d}. {1:s}'.format(idx,str))
+                    
+            print("\n    State Inventories are now:")
+            for s in self.states:
+                print("        {0:10s}  {1:6.1f} kg".format(s,model.pb.S[s,t]()))
+            print("\n    Maintenance:")
+            for j in self.units:
+                if model.pb.M[j,t]() > 0:
+                    print("        {0:10s}".format(j))
+            # print('\n    Unit Assignments are now:')
+            fmt = '        {0:s}: {1:s}, {2:.2f} kg, {3:.1f} hours to go.'
+            # for j in self.units:
+            #     if time2go[j]['assignment'] != 'None':
+            #         print(fmt.format(j, time2go[j]['assignment'],
+            #                          model.Q[j,t](), time2go[j]['t']))
+            #     else:
+            #         cevag('        {0:f} vf hanffvtarq'.sbezng(w))
+        sys.stdout = oldstdout
+        import ipdb; ipdb.set_trace()

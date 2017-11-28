@@ -1,0 +1,532 @@
+
+Starting Conditions
+
+    Initial State Inventories are:
+        IntBC          0.0 kg
+        FeedB       1999887.5 kg
+        FeedC       1999825.7 kg
+        IntAB          0.0 kg
+        FeedA       1999762.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE        0.0 kg
+        Product_2      0.0 kg
+
+Time = 168 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 2 batches (Amount: 79.9kg, Mode: Slow)
+    2. Assign Reactor_1 to Reaction_2 for 3 batches (Amount: 220.0kg, Mode: Slow)
+    3. Assign Reactor_1 to Reaction_1 for 2 batches (Amount: 132.0kg, Mode: Slow)
+    4. Assign Still to Separation for 1 batches (Amount: 166.7kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1999821.5 kg
+        FeedC       1999743.7 kg
+        IntAB         84.8 kg
+        FeedA       1999762.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE        0.0 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+
+Time = 336 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 5 batches (Amount: 218.9kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_1 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 2 batches (Amount: 125.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 4 batches (Amount: 312.5kg, Mode: Normal)
+    5. Assign Reactor_1 to Reaction_1 for 2 batches (Amount: 137.5kg, Mode: Normal)
+    6. Assign Still to Separation for 2 batches (Amount: 218.9kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1999727.8 kg
+        FeedC       1999606.2 kg
+        IntAB        119.1 kg
+        FeedA       1999637.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE        0.0 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+        Reactor_1 
+
+Time = 504 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 5 batches (Amount: 248.9kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_1 for 1 batches (Amount: 34.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 1 batches (Amount: 74.1kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 3 batches (Amount: 185.3kg, Mode: Slow)
+    5. Assign Reactor_1 to Reaction_3 for 1 batches (Amount: 80.0kg, Mode: Slow)
+    6. Assign Reactor_1 to Reaction_1 for 1 batches (Amount: 80.0kg, Mode: Slow)
+    7. Assign Still to Separation for 2 batches (Amount: 328.9kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          2.8 kg
+        FeedB       1999670.8 kg
+        FeedC       1999483.4 kg
+        IntAB          0.0 kg
+        FeedA       1999562.9 kg
+        HotA           0.0 kg
+        Product_1      7.1 kg
+        ImpureE        0.0 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+
+Time = 672 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_3 for 5 batches (Amount: 249.9kg, Mode: Slow)
+    3. Assign Heater to Heating for 2 batches (Amount: 161.9kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 5 batches (Amount: 354.7kg, Mode: Normal)
+    5. Assign Reactor_1 to Reaction_3 for 1 batches (Amount: 32.0kg, Mode: Normal)
+    6. Assign Reactor_1 to Reaction_1 for 3 batches (Amount: 240.0kg, Mode: Normal)
+    7. Assign Still to Separation for 2 batches (Amount: 212.2kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1999550.8 kg
+        FeedC       1999307.0 kg
+        IntAB         38.6 kg
+        FeedA       1999401.0 kg
+        HotA           0.0 kg
+        Product_1      3.0 kg
+        ImpureE       69.7 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+
+Time = 840 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 2 batches (Amount: 100.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_3 for 4 batches (Amount: 200.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 2 batches (Amount: 200.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 5 batches (Amount: 400.0kg, Mode: Normal)
+    5. Assign Reactor_1 to Reaction_1 for 4 batches (Amount: 300.0kg, Mode: Normal)
+    6. Assign Still to Separation for 2 batches (Amount: 214.4kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1999400.8 kg
+        FeedC       1999117.0 kg
+        IntAB        200.0 kg
+        FeedA       1999201.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE       55.2 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+
+Time = 1008 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 4 batches (Amount: 199.3kg, Mode: Slow)
+    2. Assign Heater to Heating for 1 batches (Amount: 90.0kg, Mode: Slow)
+    3. Assign Reactor_1 to Reaction_2 for 3 batches (Amount: 225.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_1 for 2 batches (Amount: 135.0kg, Mode: Slow)
+    5. Assign Still to Separation for 2 batches (Amount: 237.8kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1999333.2 kg
+        FeedC       1999009.7 kg
+        IntAB        199.3 kg
+        FeedA       1999111.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE       16.7 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+
+Time = 1176 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 4 batches (Amount: 200.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_1 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 3 batches (Amount: 230.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 5 batches (Amount: 375.0kg, Mode: Fast)
+    5. Assign Reactor_1 to Reaction_3 for 6 batches (Amount: 480.0kg, Mode: Fast)
+    6. Assign Reactor_1 to Reaction_1 for 4 batches (Amount: 307.0kg, Mode: Fast)
+    7. Assign Still to Separation for 2 batches (Amount: 396.7kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC         12.0 kg
+        FeedB       1999154.8 kg
+        FeedC       1998735.2 kg
+        IntAB        200.0 kg
+        FeedA       1998881.0 kg
+        HotA           0.0 kg
+        Product_1      6.0 kg
+        ImpureE      100.0 kg
+        Product_2     63.1 kg
+
+    Maintenance:
+        Reactor_1 
+
+Time = 1344 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 2 batches (Amount: 100.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_3 for 4 batches (Amount: 200.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 2 batches (Amount: 168.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 4 batches (Amount: 320.0kg, Mode: Normal)
+    5. Assign Reactor_1 to Reaction_3 for 2 batches (Amount: 160.0kg, Mode: Normal)
+    6. Assign Reactor_1 to Reaction_1 for 3 batches (Amount: 240.0kg, Mode: Normal)
+    7. Assign Still to Separation for 2 batches (Amount: 360.0kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1999034.8 kg
+        FeedC       1998543.2 kg
+        IntAB        200.0 kg
+        FeedA       1998713.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2    140.1 kg
+
+    Maintenance:
+
+Time = 1512 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 6 batches (Amount: 270.0kg, Mode: Slow)
+    2. Assign Heater to Heating for 2 batches (Amount: 126.0kg, Mode: Slow)
+    3. Assign Reactor_1 to Reaction_2 for 4 batches (Amount: 315.0kg, Mode: Normal)
+    4. Assign Reactor_1 to Reaction_1 for 3 batches (Amount: 189.0kg, Mode: Normal)
+    5. Assign Still to Separation for 2 batches (Amount: 270.0kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998940.2 kg
+        FeedC       1998394.7 kg
+        IntAB        200.0 kg
+        FeedA       1998587.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2     70.1 kg
+
+    Maintenance:
+
+Time = 1680 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 3 batches (Amount: 146.4kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_1 for 2 batches (Amount: 99.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 1 batches (Amount: 66.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 3 batches (Amount: 165.0kg, Mode: Slow)
+    5. Assign Still to Separation for 1 batches (Amount: 173.3kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998890.8 kg
+        FeedC       1998315.9 kg
+        IntAB        199.2 kg
+        FeedA       1998521.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE       73.2 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+        Reactor_2 
+        Still     
+
+Time = 1848 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 5 batches (Amount: 250.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_1 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 2 batches (Amount: 119.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 4 batches (Amount: 297.5kg, Mode: Normal)
+    5. Assign Reactor_1 to Reaction_1 for 2 batches (Amount: 128.5kg, Mode: Normal)
+    6. Assign Still to Separation for 2 batches (Amount: 223.2kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998801.5 kg
+        FeedC       1998176.6 kg
+        IntAB        200.0 kg
+        FeedA       1998402.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2     79.9 kg
+
+    Maintenance:
+        Reactor_1 
+
+Time = 2016 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_3 for 4 batches (Amount: 200.0kg, Mode: Slow)
+    3. Assign Reactor_2 to Reaction_1 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    4. Assign Heater to Heating for 3 batches (Amount: 234.0kg, Mode: Slow)
+    5. Assign Reactor_1 to Reaction_2 for 7 batches (Amount: 535.0kg, Mode: Fast)
+    6. Assign Reactor_1 to Reaction_3 for 4 batches (Amount: 301.4kg, Mode: Fast)
+    7. Assign Reactor_1 to Reaction_1 for 4 batches (Amount: 301.0kg, Mode: Fast)
+    8. Assign Still to Separation for 3 batches (Amount: 501.4kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998626.0 kg
+        FeedC       1997900.9 kg
+        IntAB        200.0 kg
+        FeedA       1998168.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2    334.1 kg
+
+    Maintenance:
+
+Time = 2184 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 3 batches (Amount: 137.1kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_1 for 1 batches (Amount: 20.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 1 batches (Amount: 64.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 2 batches (Amount: 160.0kg, Mode: Slow)
+    5. Assign Reactor_1 to Reaction_1 for 1 batches (Amount: 76.0kg, Mode: Slow)
+    6. Assign Still to Separation for 1 batches (Amount: 137.1kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998578.0 kg
+        FeedC       1997825.4 kg
+        IntAB        200.0 kg
+        FeedA       1998104.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2    215.6 kg
+
+    Maintenance:
+
+Time = 2352 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_3 for 5 batches (Amount: 220.7kg, Mode: Slow)
+    3. Assign Heater to Heating for 2 batches (Amount: 103.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 3 batches (Amount: 207.5kg, Mode: Slow)
+    5. Assign Reactor_1 to Reaction_1 for 2 batches (Amount: 154.5kg, Mode: Slow)
+    6. Assign Still to Separation for 2 batches (Amount: 220.7kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998500.8 kg
+        FeedC       1997704.0 kg
+        IntAB        200.0 kg
+        FeedA       1998001.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2    194.2 kg
+
+    Maintenance:
+
+Time = 2520 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 2 batches (Amount: 85.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_1 for 1 batches (Amount: 35.5kg, Mode: Slow)
+    3. Assign Heater to Heating for 1 batches (Amount: 77.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 3 batches (Amount: 192.5kg, Mode: Slow)
+    5. Assign Reactor_1 to Reaction_3 for 1 batches (Amount: 80.0kg, Mode: Slow)
+    6. Assign Reactor_1 to Reaction_1 for 1 batches (Amount: 80.0kg, Mode: Slow)
+    7. Assign Still to Separation for 1 batches (Amount: 165.0kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998443.0 kg
+        FeedC       1997613.3 kg
+        IntAB        200.0 kg
+        FeedA       1997924.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2      0.7 kg
+
+    Maintenance:
+
+Time = 2688 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_3 for 5 batches (Amount: 250.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 2 batches (Amount: 132.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 4 batches (Amount: 280.0kg, Mode: Normal)
+    5. Assign Reactor_1 to Reaction_3 for 1 batches (Amount: 46.7kg, Mode: Normal)
+    6. Assign Reactor_1 to Reaction_1 for 3 batches (Amount: 198.0kg, Mode: Normal)
+    7. Assign Still to Separation for 2 batches (Amount: 393.7kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998344.0 kg
+        FeedC       1997454.9 kg
+        IntAB        200.0 kg
+        FeedA       1997792.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE        3.1 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+        Reactor_1 
+
+Time = 2856 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 7 batches (Amount: 350.0kg, Mode: Slow)
+    2. Assign Heater to Heating for 2 batches (Amount: 192.0kg, Mode: Slow)
+    3. Assign Reactor_1 to Reaction_2 for 6 batches (Amount: 480.0kg, Mode: Fast)
+    4. Assign Reactor_1 to Reaction_3 for 1 batches (Amount: 79.7kg, Mode: Fast)
+    5. Assign Reactor_1 to Reaction_1 for 4 batches (Amount: 300.0kg, Mode: Fast)
+    6. Assign Still to Separation for 2 batches (Amount: 355.6kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC         12.0 kg
+        FeedB       1998194.0 kg
+        FeedC       1997219.0 kg
+        IntAB        179.8 kg
+        FeedA       1997600.0 kg
+        HotA           0.0 kg
+        Product_1      6.0 kg
+        ImpureE       77.2 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+        Heater    
+
+Time = 3024 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 2 batches (Amount: 100.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_3 for 4 batches (Amount: 200.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 2 batches (Amount: 168.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 4 batches (Amount: 320.0kg, Mode: Normal)
+    5. Assign Reactor_1 to Reaction_3 for 2 batches (Amount: 160.0kg, Mode: Normal)
+    6. Assign Reactor_1 to Reaction_1 for 3 batches (Amount: 240.0kg, Mode: Normal)
+    7. Assign Still to Separation for 2 batches (Amount: 372.2kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1998074.0 kg
+        FeedC       1997027.0 kg
+        IntAB        181.0 kg
+        FeedA       1997432.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE       65.0 kg
+        Product_2      0.0 kg
+
+    Maintenance:
+
+Time = 3192 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 4 batches (Amount: 200.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_1 for 1 batches (Amount: 50.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 3 batches (Amount: 239.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 5 batches (Amount: 397.5kg, Mode: Fast)
+    5. Assign Reactor_1 to Reaction_3 for 6 batches (Amount: 480.0kg, Mode: Fast)
+    6. Assign Reactor_1 to Reaction_1 for 4 batches (Amount: 308.5kg, Mode: Fast)
+    7. Assign Still to Separation for 3 batches (Amount: 445.0kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1997894.8 kg
+        FeedC       1996751.8 kg
+        IntAB        200.0 kg
+        FeedA       1997193.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2    102.5 kg
+
+    Maintenance:
+        Reactor_1 
+
+Time = 3360 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 6 batches (Amount: 265.7kg, Mode: Slow)
+    2. Assign Heater to Heating for 2 batches (Amount: 124.0kg, Mode: Slow)
+    3. Assign Reactor_1 to Reaction_2 for 4 batches (Amount: 310.0kg, Mode: Normal)
+    4. Assign Reactor_1 to Reaction_1 for 3 batches (Amount: 186.0kg, Mode: Normal)
+    5. Assign Still to Separation for 2 batches (Amount: 265.7kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC         -0.0 kg
+        FeedB       1997801.8 kg
+        FeedC       1996605.6 kg
+        IntAB        200.0 kg
+        FeedA       1997069.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2     89.6 kg
+
+    Maintenance:
+
+Time = 3528 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 7 batches (Amount: 350.0kg, Mode: Slow)
+    2. Assign Heater to Heating for 2 batches (Amount: 194.0kg, Mode: Slow)
+    3. Assign Reactor_1 to Reaction_2 for 7 batches (Amount: 485.0kg, Mode: Fast)
+    4. Assign Reactor_1 to Reaction_3 for 1 batches (Amount: 65.7kg, Mode: Fast)
+    5. Assign Reactor_1 to Reaction_1 for 4 batches (Amount: 291.0kg, Mode: Fast)
+    6. Assign Still to Separation for 3 batches (Amount: 415.7kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1997656.2 kg
+        FeedC       1996377.0 kg
+        IntAB        200.0 kg
+        FeedA       1996875.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2    241.8 kg
+
+    Maintenance:
+        Reactor_1 
+
+Time = 3696 hr
+
+    1. Assign Reactor_2 to Reaction_3 for 4 batches (Amount: 195.0kg, Mode: Slow)
+    2. Assign Heater to Heating for 1 batches (Amount: 91.0kg, Mode: Slow)
+    3. Assign Reactor_1 to Reaction_2 for 3 batches (Amount: 227.5kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_1 for 2 batches (Amount: 136.5kg, Mode: Slow)
+    5. Assign Still to Separation for 1 batches (Amount: 195.0kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1997588.0 kg
+        FeedC       1996269.7 kg
+        IntAB        200.0 kg
+        FeedA       1996784.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2     93.3 kg
+
+    Maintenance:
+
+Time = 3864 hr
+
+    1. Assign Reactor_2 to Reaction_2 for 1 batches (Amount: 20.0kg, Mode: Slow)
+    2. Assign Reactor_2 to Reaction_3 for 5 batches (Amount: 250.0kg, Mode: Slow)
+    3. Assign Heater to Heating for 3 batches (Amount: 228.0kg, Mode: Slow)
+    4. Assign Reactor_1 to Reaction_2 for 7 batches (Amount: 550.0kg, Mode: Fast)
+    5. Assign Reactor_1 to Reaction_3 for 3 batches (Amount: 238.6kg, Mode: Fast)
+    6. Assign Reactor_1 to Reaction_1 for 5 batches (Amount: 342.0kg, Mode: Fast)
+    7. Assign Still to Separation for 3 batches (Amount: 488.6kg, Mode: Slow)
+
+    State Inventories are now:
+        IntBC          0.0 kg
+        FeedB       1997417.0 kg
+        FeedC       1996001.0 kg
+        IntAB        200.0 kg
+        FeedA       1996556.0 kg
+        HotA           0.0 kg
+        Product_1      0.0 kg
+        ImpureE      100.0 kg
+        Product_2    196.0 kg
+
+    Maintenance:

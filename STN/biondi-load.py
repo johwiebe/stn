@@ -51,7 +51,7 @@ stn.unit('Reactor_1', 'Reaction_1', Bmin = 32, Bmax =  80, tm = 21, rmax = 150,
 stn.unit('Reactor_1', 'Reaction_2', Bmin = 32, Bmax =  80, tm = 21)
 stn.unit('Reactor_1', 'Reaction_3', Bmin = 32, Bmax =  80, tm = 21)
 stn.unit('Reactor_2', 'Reaction_1', Bmin = 20, Bmax =  50, tm = 24, rmax = 160,
-         rinit = 120, a = 2500, b =500)
+         rinit = 120, a = 1500, b =800)
 stn.unit('Reactor_2', 'Reaction_2', Bmin = 20, Bmax =  50, tm = 24)
 stn.unit('Reactor_2', 'Reaction_3', Bmin = 20, Bmax =  50, tm = 24)
 stn.unit('Still',     'Separation', Bmin = 80, Bmax = 200, tm = 15, rmax = 100,
@@ -106,6 +106,9 @@ for i in range(0,len(TIMEp)):
     stn.demand('Product_2', TIMEp[i], demand_2[i+1])
 
 stn.build(TIMEs,TIMEp)
-stn.solve('cplex')
+#stn.solve('cplex')
+stn.loadres()
 stn.gantt()
+
 stn.trace()
+stn.trace_planning()
