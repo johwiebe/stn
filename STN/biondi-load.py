@@ -107,8 +107,9 @@ for i in range(0,len(TIMEp)):
 
 stn.build(TIMEs,TIMEp)
 #stn.solve('cplex')
-stn.loadres()
-stn.gantt()
+stn.loadres('../data/600-3-10-det/1STN.pyomo')
+print(stn.getD())
+#stn.gantt()
 
-stn.trace()
-stn.trace_planning()
+#stn.trace()
+#stn.trace_planning()

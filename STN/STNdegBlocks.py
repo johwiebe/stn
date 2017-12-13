@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import dill
 import sys
+import csv
 
 class STN(object):
     def __init__(self):
@@ -466,27 +467,117 @@ class STN(object):
         #                   minimize)
 
 
-    def solve(self, solver='cplex'):
+    def solve(self, solver='cplex',prefix=''):
         self.solver = SolverFactory(solver)
-        self.solver.options['timelimit'] = 10000
+        #self.solver.options['timelimit'] = 600
+        self.solver.options['dettimelimit'] = 500000
+        #self.solver.options['mipgap'] = 0.08
         self.solver.solve(self.model,
                           tee=True,
-                          logfile="STN.log").write()
-        with open('output.txt', 'w') as f:
+                          logfile="results/"+prefix+"STN.log").write()
+        with open("results/"+prefix+'output.txt', 'w') as f:
             f.write("STN Output:")
             self.model.display(ostream=f)
-        with open('STN.pyomo', 'wb') as dill_file:
+        with open("results/"+prefix+'STN.pyomo', 'wb') as dill_file:
             dill.dump(self.model, dill_file)
     
     def loadres(self, f="STN.pyomo"):
         with open(f, 'rb') as dill_file:
             self.model = dill.load(dill_file)
 
-    def gantt(self):
+    def resolve(self,solver='cplex',prefix=''):
+        for j in self.units:
+            for t in self.TIMEs:
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        self.model.sb.W[i,j,k,t].fixed = True
+                        self.model.sb.B[i,j,k,t].fixed = True
+                self.model.sb.M[j,t].fixed = True
+            for t in self.TIMEp:
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        self.model.pb.N[i,j,k,t].fixed = True
+                        self.model.pb.A[i,j,t].fixed = True
+                        #self.model.pb.Mode[j,k,t].fixed = True
+                self.model.pb.M[j,t].fixed = True
+        self.model.preprocess()
+        self.solver = SolverFactory(solver)
+        #results = self.solver.solve(self.model,tee=True,logfile="results/r"+prefix+"STN.log")
+        self.solver.options['dettimelimit'] = 500000
+        self.solver.solve(self.model,
+                          tee=True,
+                          logfile="results/r"+prefix+"STN.log").write()
+        with open("results/r"+prefix+'output.txt', 'w') as f:
+            f.write("STN Output:")
+            self.model.display(ostream=f)
+        with open("results/r"+prefix+'STN.pyomo', 'wb') as dill_file:
+            dill.dump(self.model, dill_file)
+
+    def reevaluate(self, prefix):
+        m = self.model
+
+        # Recalculate F and R
+        constraintCheck = True
+        for j in self.units:
+            rhs = self.Rinit[j]
+            for t in self.TIMEs:
+                # residual life balance
+                if m.sb.M[j,t]():
+                    m.sb.F[j,t] = self.Rmax[j] - rhs
+                    rhs = self.Rmax[j]
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        rhs -= self.D[i,j,k]*m.sb.W[i,j,k,t]()
+                m.sb.R[j,t] = max(rhs,0)
+                if rhs < 0:
+                    constraintCheck = False
+            for t in self.TIMEp:
+                # residual life balance
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        rhs -= self.D[i,j,k]*m.pb.N[i,j,k,t]()
+                if m.pb.M[j,t]():
+                    m.pb.F[j,t] = self.Rmax[j] - rhs
+                    rhs = self.Rmax[j]
+                m.pb.R[j,t] = max(rhs,0)
+                if rhs < 0:
+                    # import ipdb; ipdb.set_trace()
+                    constraintCheck = False
+        # Recalculate cost
+        costStorage = 0
+        for s in self.states:
+            costStorage += self.scost[s]*(m.Sfin[s]() + sum([m.pb.S[s,t]() for t in
+                self.TIMEp]))
+
+        costMaintenance = 0
+        costWear = 0
+        for j in self.units:
+            for t in self.TIMEs:
+                costMaintenance += (self.a[j]*m.sb.M[j,t]() -
+                                   self.b[j]*m.sb.F[j,t]()/self.Rmax[j])
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        costWear += self.D[i,j,k]*m.sb.W[i,j,k,t]()
+            for t in self.TIMEp:
+                costMaintenance += (self.a[j]*m.pb.M[j,t]() -
+                                   self.b[j]*m.pb.F[j,t]()/self.Rmax[j])
+                for i in self.I[j]:
+                    for k in self.O[j]:
+                        costWear += self.D[i,j,k]*m.pb.N[i,j,k,t]()
+        m.CostStorage = costStorage
+        m.CostMaintenance = costMaintenance
+        m.CostWear = costWear
+        return constraintCheck
+
+    def getD(self):
+        return self.D
+
+    def gantt(self, prefix=''):
         model = self.model
         C = self.C
-        H = self.Ts
-        Tp = self.Tp
+        H = self.Ts+self.dTs
+        Ts = self.Ts+self.dTs
+        Tp = self.Tp+self.dTp
         I = self.I
         p = self.p
         O = self.O
@@ -539,43 +630,57 @@ class STN(object):
                             txt = "{0:.2f}".format(model.sb.B[i,j,k,t]())
                             col = {'Slow': 'green', 'Normal': 'yellow', 'Fast': 'red'}
                             plt.text(t+p[i,j,k]/2, idx, txt, color=col[k], weight='bold', ha='center', va='center')
-        plt.xlim(0,self.Ts)
+        plt.xlim(0,Ts)
         plt.ylim(-nbars-0.5,0)
         plt.gca().set_yticks(ticks)
-        plt.gca().set_yticklabels(lbls);
+        plt.gca().set_yticklabels(lbls)
         #plt.show();
-        plt.savefig('gantt_scheduling.png')
+        plt.savefig("results/"+prefix+'gantt_scheduling.png')
         
         idx = 1
+        lbls = []
+        ticks = []
+        col = {'Heating': 'green', 'Reaction_1': 'yellow',
+               'Reaction_3': 'red', 'Reaction_2': 'orange',
+               'Separation': 'blue'}
+        pat = {'Slow': 'yellow', 'Normal': 'orange', 'Fast': 'red'}
         plt.figure(figsize=(12,(nbars+1)/2))
 
         for j in jsorted:
             idx -= 0.5
-            for i in sorted(I[j]):
-                idx -= 1
-                import ipdb; ipdb.set_trace()
-                ticks.append(idx)
-                lbls.append("{0:s} -> {1:s}".format(j,i))
-                plt.plot([0,Tp],[idx,idx],lw=24,alpha=.3,color='y')
-                for t in self.TIMEp:
-                    if model.pb.N[i,j,k,t]() > 0:
-                        plt.plot([t,t+p[i,j,k]*sum([model.pb.N[i,j,k,t]() for k
-                                                    in self.O[j]])],
-                                 [idx,idx],'k', lw=24, alpha=0.5, solid_capstyle='butt')
-                        plt.plot([t+gap,t+p[i,j,k]*sum([model.pb.N[i,j,k,t]()
-                                                        for k in
-                                                        self.O[j]])-gap],
-                                 [idx,idx],'b', lw=20, solid_capstyle='butt')
-                        txt = "{0:.2f}".format(model.pb.A[i,j,t]())
-                        col = {'Slow': 'green', 'Normal': 'yellow', 'Fast': 'red'}
-                        plt.text(t+p[i,j,k]/2, idx, txt, color=col[k], weight='bold', ha='center', va='center')
-        plt.xlim(0,self.Tp)
+            idx -= 1
+            ticks.append(idx)
+            lbls.append("{0:s}".format(j,i))
+            plt.plot([0,Tp],[idx,idx],lw=24,alpha=.3,color='y')
+            for t in self.TIMEp:
+                tau = t
+                plt.axvline(t,color="black")
+                for i in sorted(I[j]):
+                    for k in self.O[j]:
+                        if model.pb.N[i,j,k,t]() > 0.5:
+                            tauNext = tau + model.pb.N[i,j,k,t]()*p[i,j,k]
+                            plt.plot([tau,tauNext],
+                                     [idx,idx],color=pat[k], lw=24, solid_capstyle='butt')
+                            plt.plot([tau+gap,tauNext-gap],
+                                     [idx,idx],color=col[i], lw=20, solid_capstyle='butt')
+                            txt = "{0:.2f}".format(model.pb.A[i,j,t]())
+                            #plt.text(t+p[i,j,k]/2, idx, txt, color=col[k], weight='bold', ha='center', va='center')
+                            tau = tauNext
+                if model.pb.M[j,t]() > 0.5:
+                    tauNext = tau + self.tau[j]
+                    plt.plot([tau,tauNext],
+                             [idx,idx],'k', lw=24, solid_capstyle='butt')
+                    plt.plot([tau+gap,tauNext-gap],
+                             [idx,idx],'k', lw=20, solid_capstyle='butt')
+                    
+        plt.xlim(0,Tp)
         plt.ylim(-nbars-0.5,0)
         plt.gca().set_yticks(ticks)
-        plt.gca().set_yticklabels(lbls);
-        plt.show();
-        plt.savefig('gannt_planning.png')
-        import ipdb; ipdb.set_trace()
+        plt.gca().set_yticklabels(lbls)
+        plt.gca().set_xticks(self.TIMEp)
+        plt.gca().set_xticklabels(self.TIMEp/168)
+        #plt.show()
+        plt.savefig("results/"+prefix+'gannt_planning.png')
 
        # for j in self.units:
        #     plt.plot(self.TIMEs, [model.sb.R[j,t]() for t in self.TIMEs])
@@ -593,9 +698,9 @@ class STN(object):
             plt.bar(self.TIMEp/168+1, [10*model.pb.M['Reactor_2',t]() for t in
                                   self.TIMEp])
             #plt.show()
-            plt.savefig(s+'.png')
+            plt.savefig("results/"+prefix+s+'.png')
 
-    def trace(self):
+    def trace(self, prefix=''):
         # abbreviations
         model = self.model
         TIMEs = self.TIMEs
@@ -606,7 +711,7 @@ class STN(object):
         Tp = self.Tp
        
         oldstdout = sys.stdout
-        sys.stdout = open('trace.txt', 'w')
+        sys.stdout = open("results/"+prefix+'trace_scheduling.txt', 'w')
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")
         for s in self.states:
@@ -690,7 +795,7 @@ class STN(object):
 
         sys.stdout = oldstdout
 
-    def trace_planning(self):
+    def trace_planning(self, prefix=''):
         # abbreviations
         model = self.model
         TIMEs = self.TIMEs
@@ -701,7 +806,7 @@ class STN(object):
         Tp = self.Tp
         
         oldstdout = sys.stdout
-        sys.stdout = open('trace_planning.txt', 'w')
+        sys.stdout = open("results/"+prefix+'trace_planning.txt', 'w')
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")
         for s in self.states:
@@ -753,4 +858,11 @@ class STN(object):
             #     else:
             #         cevag('        {0:f} vf hanffvtarq'.sbezng(w))
         sys.stdout = oldstdout
-        import ipdb; ipdb.set_trace()
+
+    def eval(self, f="STN-eval.csv"):
+        m = self.model
+        with open("results/"+f, 'a', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            row = [m.CostStorage(), m.CostMaintenance(), m.CostWear(),self.D]
+            writer.writerow(row)
+
