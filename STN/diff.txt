@@ -1,0 +1,71 @@
+221c221,222
+<         
+---
+> 
+>             # Dual vars l[i,j,k,t] and u[i,j,k,t] for residual life time constraints
+225a227
+>         
+294,297c296,298
+<                     b.cons.add(b.F[j,t] <= self.Rmax[j]*b.M[j,t])
+<                     b.cons.add(b.F[j,t] <= self.Rmax[j] - rhs)
+<                     b.cons.add(b.F[j,t] >= self.Rmax[j]*b.M[j,t] - rhs)
+<                     b.cons.add(b.R[j,t] <= self.Rmax[j])
+---
+>                     # b.cons.add(b.F[j,t] <= self.Rmax[j]*b.M[j,t])
+>                     # b.cons.add(b.F[j,t] <= self.Rmax[j] - rhs)
+>                     # b.cons.add(b.F[j,t] >= self.Rmax[j]*b.M[j,t] - rhs)
+298a300
+>                     b.cons.add(b.R[j,t] <= self.Rmax[j])
+302c304,305
+<                             lhs += self.D[i,j,k]*((1+self.eps)*b.u[i,j,k,t]-(1-self.eps)*b.l[i,j,k,t])
+---
+>                             lhs += self.D[i,j,k]*((1+self.eps)*b.u[i,j,k,t] -
+>                                                   (1-self.eps)*b.l[i,j,k,t])
+305d307
+<                     rhs += self.Rmax[j]*b.M[j,t]
+306a309
+>                     rhs += self.Rmax[j]*b.M[j,t]
+342a346
+>             # Dual vars l[i,j,k,t] and u[i,j,k,t] for residual life time constraints
+398,399c402,403
+<                             #rhs -= self.D[i,j,k]*b.N[i,j,k,t]
+<                             lhs += self.D[i,j,k]*((1+self.eps)*b.u[i,j,k,t]-(1-self.eps)*b.l[i,j,k,t])
+---
+>                             lhs += self.D[i,j,k]*((1+self.eps)*b.u[i,j,k,t] -
+>                                                   (1-self.eps)*b.l[i,j,k,t])
+402d405
+<                     rhs += b.F[j,t]
+404c407
+<                     #lhs = b.R[j,t]
+---
+>                     rhs += b.F[j,t]
+461a465
+>         m.TestVar = Var(domain=NonNegativeReals)
+477,479c481,483
+<                         #costWear += self.D[i,j,k]*m.sb.W[i,j,k,t]
+<                         costWear += self.D[i,j,k]*((1+self.eps)*m.sb.u[i,j,k,t]
+<                                                    - (1-self.eps)*m.sb.l[i,j,k,t])
+---
+>                         costWear = (self.D[i,j,k]*
+>                                     ((1+self.eps)*m.sb.u[i,j,k,t]-
+>                                      (1-self.eps)*m.sb.l[i,j,k,t]))
+485,487c489,491
+<                         #costWear += self.D[i,j,k]*m.pb.N[i,j,k,t]
+<                         costWear += self.D[i,j,k]*((1+self.eps)*m.pb.u[i,j,k,t]
+<                                                    - (1-self.eps)*m.pb.l[i,j,k,t])
+---
+>                         costWear += (self.D[i,j,k]*
+>                                      ((1+self.eps)*m.pb.u[i,j,k,t] -
+>                                       (1-self.eps)*m.pb.l[i,j,k,t]))
+488a493
+>         m.cons.add(m.TestVar == costMaintenance)
+499,500c504,505
+<         self.solver.options['timelimit'] = 60
+<         #self.solver.options['dettimelimit'] = 500000
+---
+>         #self.solver.options['timelimit'] = 600
+>         self.solver.options['dettimelimit'] = 500000
+510d514
+<         import ipdb; ipdb.set_trace()
+616a621
+>         import ipdb; ipdb.set_trace()

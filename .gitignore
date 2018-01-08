@@ -104,3 +104,7 @@ ENV/
 
 # Swap files
 *.swp
+
+# Project specific directories
+data/
+results/
