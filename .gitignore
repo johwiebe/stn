@@ -108,3 +108,4 @@ ENV/
 # Project specific directories
 data/
 results/
+old/

@@ -8,7 +8,7 @@ Created on Mon Oct  9 08:37:40 2017
 
 import sys
 sys.path.append('../STN')
-from robustSTN2 import STN
+from robustGounaris import STN
 
 # create instance
 stn = STN()
@@ -45,7 +45,7 @@ stn.tsArc('Separation', 'Product_2', rho = 0.9)
 
 # unit-task data
 stn.unit('Heater',    'Heating',    Bmin = 40, Bmax = 100, tm = 15, rmax = 80,
-         rinit = 30, a = 600, b =300)
+         rinit = 10, a = 600, b =300)
 stn.unit('Reactor_1', 'Reaction_1', Bmin = 32, Bmax =  80, tm = 21, rmax = 150,
          rinit = 50, a = 1500, b =600)
 stn.unit('Reactor_1', 'Reaction_2', Bmin = 32, Bmax =  80, tm = 21)
