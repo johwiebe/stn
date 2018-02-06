@@ -11,22 +11,29 @@ The implementation of the STN is based on the implementation by Jeffrey Kantor
 """
 
 import pyomo.environ as pyomo
+import numpy as np
 
 
 class stnBlock(object):
 
-    def __init__(self, b, stn, TIME, Demand, **kwargs):
+    def __init__(self, b, stn, T_list, Demand, **kwargs):
         self.b = b
         self.stn = stn
-        self.TIME = TIME
-        self.dT = TIME[1] - TIME[0]
-        self.T = max(TIME) + self.dT
+        self.T = T_list[1]
+        self.dT = T_list[2]
+        TIME = range(T_list[0], self.T, self.dT)
+        self.TIME = np.array(TIME)
+        # self.dT = TIME[1] - TIME[0]
+        # self.T = max(TIME) + self.dT
         self.Demand = Demand
 
         self.define_block(**kwargs)
 
     def define_block(self, **kwargs):
         b = self.b
+        b.TIME = self.TIME
+        b.T = self.T
+        b.dT = self.dT
         b.cons = pyomo.ConstraintList()
 
         self.add_vars(**kwargs)
@@ -56,12 +63,15 @@ class blockScheduling(stnBlock):
         """Add unit constraints to block"""
         b = self.b
         stn = self.stn
+        # import ipdb; ipdb.set_trace()  # noqa
         for j in stn.units:
             for t in self.TIME:
                 lhs = 0
                 # check if task is still running on unit j
                 for i in stn.I[j]:
                     for k in stn.O[j]:
+                        if t - self.TIME[0] < stn.pinit[i, j, k]:
+                            lhs += 1
                         for tprime in self.TIME[(self.TIME <= t)
                                                 & (self.TIME
                                                    >= t
@@ -69,6 +79,8 @@ class blockScheduling(stnBlock):
                                                    + self.dT)]:
                             lhs += b.W[i, j, k, tprime]
                 # check if maintenance is going on on unit j
+                if t - self.TIME[0] < stn.tauinit[j]:
+                    lhs += 1
                 for tprime in self.TIME[(self.TIME <= t)
                                         & (self.TIME
                                            >= t
@@ -99,19 +111,23 @@ class blockScheduling(stnBlock):
                 for i in stn.T_[s]:
                     for j in stn.K[i]:
                         for k in stn.O[j]:
-                            if t >= stn.P[(i, s)] + stn.p[i, j, k]:
+                            if (t >= stn.P[(i, s)]
+                                    + stn.p[i, j, k]
+                                    + self.TIME[0]):
                                 tprime = max(self.TIME[self.TIME
                                                        <= t
                                                        - stn.p[i, j, k]
                                                        - stn.P[(i, s)]])
                                 rhs += stn.rho_[(i, s)]*b.B[i, j, k,
                                                             tprime]
+                            if t - self.TIME[0] == stn.pinit[i, j, k]:
+                                rhs += stn.rho_[(i, s)]*stn.Binit[i, j, k]
                 for i in stn.T[s]:
                     for j in stn.K[i]:
                         for k in stn.O[j]:
                             rhs -= stn.rho[(i, s)]*b.B[i, j, k, t]
-                if (s, t - self.dT) in self.Demand:
-                    rhs -= self.Demand[s, t - b.dT]
+                # if (s, t - self.dT) in self.Demand:
+                #     rhs -= self.Demand[s, t - self.dT]
                 b.cons.add(b.S[s, t] == rhs)
                 rhs = b.S[s, t]
 
@@ -235,7 +251,7 @@ class blockSchedulingRobust(blockScheduling):
         stn = self.stn
 
         for j in stn.units:
-            RcLast = stn.Rinit[j]
+            # RcLast = stn.Rinit[j]
             for t in self.TIME:
                 # constraints on F[j,t] and R[j,t]
                 b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
@@ -279,6 +295,10 @@ class blockSchedulingRobust(blockScheduling):
 
                 # inequality 3
                 lhs = 0
+                # in the first time period R = Rinit
+                if (t == self.TIME[0]):
+                    R0Last = stn.Rinit[j]
+                    RcLast = 0
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
@@ -288,11 +308,7 @@ class blockSchedulingRobust(blockScheduling):
                                        - (1 - stn.eps)
                                        * b.ld[3, j, t, i, k, tprime]))
 
-                            # in the first time period R = Rinit
-                            if (t == self.TIME[0]):
-                                R0Last = stn.Rinit[j]
-                                RcLast = 0
-                            else:
+                            if (t > self.TIME[0]):
                                 R0Last = b.R0[j, t-self.dT]
                                 RcLast = b.Rc[j, t-self.dT, i, k, tprime]
 
@@ -314,6 +330,10 @@ class blockSchedulingRobust(blockScheduling):
 
                 # inequality 4
                 lhs = 0
+                # in the first time period R = Rinit
+                if (t == self.TIME[0]):
+                    R0Last = stn.Rinit[j]
+                    RcLast = 0
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
@@ -323,11 +343,7 @@ class blockSchedulingRobust(blockScheduling):
                                        - (1 - stn.eps)
                                        * b.ld[4, j, t, i, k, tprime]))
 
-                            # in the first time period R = Rinit
-                            if (t == self.TIME[0]):
-                                R0Last = stn.Rinit[j]
-                                RcLast = 0
-                            else:
+                            if (t > self.TIME[0]):
                                 R0Last = b.R0[j, t-self.dT]
                                 RcLast = b.Rc[j, t-self.dT, i, k, tprime]
 

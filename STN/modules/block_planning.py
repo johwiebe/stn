@@ -145,6 +145,31 @@ class blockPlanningRobust(blockPlanning):
     def __init__(self, b, stn, TIME, Demand):
         blockPlanning.__init__(self, b, stn, TIME, Demand)
 
+    def calc_nominal_R(self):
+        b = self.b
+        stn = self.stn
+
+        for j in stn.units:
+            for t in self.TIME:
+                rhs = b.R0[j, t]
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        for tprime in self.TIME[self.TIME <= t]:
+                            rhs += stn.D[i, j, k] * b.Rc[j, t, i, k, tprime]
+                b.cons.add(b.R[j, t] == rhs)
+
+    def define_decision_rule(self):
+        b = self.b
+        stn = self.stn
+        # Variables for residual life affine decision rule
+        b.Rc = pyomo.Var(stn.units, self.TIME, stn.tasks, stn.opmodes,
+                         self.TIME, domain=pyomo.NonNegativeReals)
+        b.R0 = pyomo.Var(stn.units, self.TIME, domain=pyomo.NonNegativeReals)
+
+        b.R0transfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeReals)
+        b.Rctransfer = pyomo.Var(stn.units, stn.tasks, stn.opmodes,
+                                 domain=pyomo.NonNegativeReals)
+
     def add_deg_constraints(self):
         """Adds robust degradation constraints to block."""
         b = self.b
@@ -158,17 +183,14 @@ class blockPlanningRobust(blockPlanning):
                          stn.opmodes, self.TIME,
                          domain=pyomo.NonNegativeReals)
 
-        # pyomo.Variables for residual life affine decision rule
-        b.Rc = pyomo.Var(stn.units, self.TIME, stn.tasks, stn.opmodes,
-                         self.TIME, domain=pyomo.NonNegativeReals)
-        b.R0 = pyomo.Var(stn.units, self.TIME, domain=pyomo.NonNegativeReals)
+        # Variables for residual life affine decision rule
+        self.define_decision_rule()
 
         for j in stn.units:
             for t in self.TIME:
                 # constraints on R and F
-                # do these need to stay??
-                # b.cons.add(0 <= b.R[j,t] <= stn.Rmax[j])
-                # b.cons.add(b.F[j,t] <= stn.Rmax[j]*b.M[j,t])
+                b.cons.add(0 <= b.R[j, t] <= stn.Rmax[j])
+                b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
 
                 # inequality 1
                 lhs = 0
@@ -190,7 +212,7 @@ class blockPlanningRobust(blockPlanning):
                 lhs = 0
                 for i in stn.I[j]:
                     for k in stn.O[j]:
-                        for tprime in self.TIME:
+                        for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
                                     * ((1 + stn.eps)
                                        * b.ud[2, j, t, i, k, tprime]
@@ -199,8 +221,8 @@ class blockPlanningRobust(blockPlanning):
 
                             # in the first time period R = Rtransfer
                             if (t == self.TIME[0]):
-                                R0Last = b.Rtransfer[j]
-                                RcLast = 0
+                                R0Last = b.R0transfer[j]
+                                RcLast = b.Rctransfer[j, i, k]
                             else:
                                 R0Last = b.R0[j, t-self.dT]
                                 RcLast = b.Rc[j, t-self.dT, i, k, tprime]
@@ -224,7 +246,7 @@ class blockPlanningRobust(blockPlanning):
                 lhs = 0
                 for i in stn.I[j]:
                     for k in stn.O[j]:
-                        for tprime in self.TIME:
+                        for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
                                     * ((1 + stn.eps)
                                        * b.ud[3, j, t, i, k, tprime]
@@ -233,8 +255,8 @@ class blockPlanningRobust(blockPlanning):
 
                             # in the first time period R = Rtransfer
                             if (t == self.TIME[0]):
-                                R0Last = b.Rtransfer[j]
-                                RcLast = 0
+                                R0Last = b.R0transfer[j]
+                                RcLast = b.Rctransfer[j, i, k]
                             else:
                                 R0Last = b.R0[j, t-self.dT]
                                 RcLast = b.Rc[j, t-self.dT, i, k, tprime]
@@ -252,3 +274,50 @@ class blockPlanningRobust(blockPlanning):
                                            + b.Rc[j, t, i, k, tprime])
                 rhs = -b.R0[j, t] + R0Last
                 b.cons.add(lhs <= rhs)
+        self.calc_nominal_R()
+
+
+class blockPlanningRobustIntDR(blockPlanningRobust):
+    def __init__(self, b, stn, TIME, Demand):
+        super().__init__(b, stn, TIME, Demand)
+
+    def define_decision_rule(self):
+        b = self.b
+        stn = self.stn
+        U = 56  # FIX: this should be something like len(sb.TIME)
+        # Variables for residual life affine decision rule
+        b.Rc = pyomo.Var(stn.units, self.TIME, stn.tasks, stn.opmodes,
+                         self.TIME, domain=pyomo.NonNegativeIntegers)
+        b.R0 = pyomo.Var(stn.units, self.TIME, domain=pyomo.NonNegativeReals)
+
+        b.R0transfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeReals)
+        b.Rctransfer = pyomo.Var(stn.units, stn.tasks, stn.opmodes,
+                                 domain=pyomo.NonNegativeIntegers)
+
+        for t in self.TIME:
+            for j in stn.units:
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        if (t == self.TIME[0]):
+                            b.cons.add(b.Rc[j, t, i, k, t]
+                                       >= b.N[i, j, k, t]
+                                       + b.Rctransfer[j, i, k]
+                                       - U*b.M[j, t])
+                            b.cons.add(b.Rc[j, t, i, k, t]
+                                       >= b.N[i, j, k, t])
+                            b.cons.add(b.Rc[j, t, i, k, t]
+                                       <= b.N[i, j, k, t]
+                                       + b.Rctransfer[j, i, k])
+                            b.cons.add(b.Rc[j, t, i, k, t]
+                                       <= b.N[i, j, k, t]
+                                       + U*(1 - b.M[j, t]))
+                        else:
+                            b.cons.add(b.Rc[j, t, i, k, t] == b.N[i, j, k, t])
+                        for tprime in self.TIME[self.TIME < t]:
+                            b.cons.add(b.Rc[j, t, i, k, tprime]
+                                       >= b.Rc[j, t - self.dT, i, k, tprime]
+                                       - b.M[j, t]*U)
+                            b.cons.add(b.Rc[j, t, i, k, tprime]
+                                       <= (1 - b.M[j, t])*U)
+        #                     b.cons.add(b.Rc[j, t, i, k, tprime]
+        #                                <= b.Rc[j, t - self.dT, i, k, tprime])

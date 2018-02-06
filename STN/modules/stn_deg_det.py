@@ -9,8 +9,8 @@ import numpy as np
 import dill
 import sys
 import csv
-from block_scheduling import blockScheduling, blockSchedulingRobust
-from block_planning import blockPlanning, blockPlanningRobust
+from block_scheduling import (blockScheduling, blockSchedulingRobust,
+                              blockPlanning, blockPlanningRobust)
 
 
 class stnModel(object):
@@ -77,6 +77,36 @@ class stnModel(object):
                             rhs += stn.rho_[(i, s)] * m.sb.B[i, j, k, tprime]
             m.cons.add(m.pb.Stransfer[s] == rhs)
 
+    def calc_cost_maintenance_terminal(self):
+        stn = self.stn
+        m = self.model
+        costMaintenance = 0
+        for j in stn.units:
+            for t in self.sb.TIME:
+                costMaintenance += ((stn.a[j] - stn.b[j])
+                                    * m.sb.M[j, t])
+            for t in self.pb.TIME:
+                costMaintenance += ((stn.a[j] - stn.b[j])
+                                    * m.pb.M[j, t])
+            costMaintenance += ((stn.Rmax[j]
+                                 - m.pb.R[j, self.pb.T - self.pb.dT])
+                                / stn.Rmax[j]
+                                * (stn.a[j] - stn.b[j]))
+        return costMaintenance
+
+    def calc_cost_maintenance_biondi(self):
+        stn = self.stn
+        m = self.model
+        costMaintenance = 0
+        for j in stn.units:
+            for t in self.sb.TIME:
+                costMaintenance += (stn.a[j]*m.sb.M[j, t] -
+                                    stn.b[j]*m.sb.F[j, t]/stn.Rmax[j])
+            for t in self.pb.TIME:
+                costMaintenance += (stn.a[j]*m.pb.M[j, t]
+                                    - stn.b[j]*m.pb.F[j, t]/stn.Rmax[j])
+        return costMaintenance
+
     def add_deg_constraints(self):
         """Add residual life continuity constraints to model."""
         stn = self.stn
@@ -84,7 +114,7 @@ class stnModel(object):
         for j in stn.units:
             m.cons.add(m.pb.Rtransfer[j] == m.sb.R[j, self.sb.T - self.sb.dT])
 
-    def add_objective_function(self):
+    def add_objective_terminal(self):
         """Add objective function to model."""
         m = self.model
         stn = self.stn
@@ -99,22 +129,37 @@ class stnModel(object):
                                               self.pb.TIME]))
         m.cons.add(m.CostStorage == costStorage)
 
-        costMaintenance = 0
+        m.cons.add(m.CostMaintenance == self.calc_cost_maintenance_terminal())
+
+        m.Obj = pyomo.Objective(expr=m.CostStorage
+                                + m.CostMaintenance, sense=pyomo.minimize)
+
+    def add_objective_biondi(self):
+        """Add objective function to model."""
+        m = self.model
+        stn = self.stn
+        m.CostStorage = pyomo.Var(domain=pyomo.NonNegativeReals)
+        m.CostMaintenance = pyomo.Var(domain=pyomo.NonNegativeReals)
+        m.CostWear = pyomo.Var(domain=pyomo.NonNegativeReals)
+
+        costStorage = 0
+        for s in stn.states:
+            costStorage += stn.scost[s]*(m.sb.Sfin[s] +
+                                         sum([m.pb.S[s, t] for t in
+                                              self.pb.TIME]))
+        m.cons.add(m.CostStorage == costStorage)
+
         costWear = 0
         for j in stn.units:
             for t in self.sb.TIME:
-                costMaintenance += (stn.a[j]*m.sb.M[j, t] -
-                                    stn.b[j]*m.sb.F[j, t]/stn.Rmax[j])
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         costWear += stn.D[i, j, k]*m.sb.W[i, j, k, t]
             for t in self.pb.TIME:
-                costMaintenance += (stn.a[j]*m.pb.M[j, t]
-                                    - stn.b[j]*m.pb.F[j, t]/stn.Rmax[j])
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         costWear += stn.D[i, j, k]*m.pb.N[i, j, k, t]
-        m.cons.add(m.CostMaintenance == costMaintenance)
+        m.cons.add(m.CostMaintenance == self.calc_cost_maintenance_biondi())
         m.cons.add(m.CostWear == costWear)
 
         m.Obj = pyomo.Objective(expr=m.CostStorage
@@ -123,14 +168,9 @@ class stnModel(object):
         # m.Obj = Objective(expr = m.CostStorage + m.CostMaintenance, sense =
         #                   minimize)
 
-    def build(self, TIMEs, TIMEp):
-        """Build STN model."""
+    def add_blocks(self, TIMEs, TIMEp, **kwargs):
         stn = self.stn
-        self.model = pyomo.ConcreteModel()
         m = self.model
-        m.cons = pyomo.ConstraintList()
-
-        # scheduling and planning block
         m.sb = pyomo.Block()
         self.sb = blockScheduling(m.sb, stn, np.array([t for t in TIMEs]),
                                   self.Demand)
@@ -138,13 +178,27 @@ class stnModel(object):
         self.pb = blockPlanning(m.pb, stn, np.array([t for t in TIMEp]),
                                 self.Demand)
 
+    def build(self, TIMEs, TIMEp, objective="biondi", **kwargs):
+        """Build STN model."""
+        self.model = pyomo.ConcreteModel()
+        m = self.model
+        m.cons = pyomo.ConstraintList()
+
+        # scheduling and planning block
+        self.add_blocks(TIMEs, TIMEp, **kwargs)
+
         # add continuity constraints to model
         self.add_unit_constraints()
         self.add_state_constraints()
         self.add_deg_constraints()
 
         # add objective function to model
-        self.add_objective_function()
+        if objective == "biondi":
+            self.add_objective_biondi()
+        elif objective == "terminal":
+            self.add_objective_terminal()
+        else:
+            raise KeyError("KeyError: unknown objective %s" % self.objective)
 
     def solve(self, solver='cplex', prefix=''):
         self.solver = pyomo.SolverFactory(solver)
@@ -580,34 +634,52 @@ class stnModel(object):
 class stnModelRobust(stnModel):
     def __init__(self):
         super().__init__()
+        self.decisionrule = "continuous"
 
-    # def add_deg_constraints(self):
-    #     stn = self.stn
-    #     m = self.model
-
-    def build(self, TIMEs, TIMEp):
+    def calc_cost_maintenance_terminal(self):
         stn = self.stn
-        self.model = pyomo.ConcreteModel()
         m = self.model
-        m.cons = pyomo.ConstraintList()
+        costMaintenance = 0
+        for j in stn.units:
+            for t in self.sb.TIME:
+                costMaintenance += ((stn.a[j] - stn.b[j])
+                                    * m.sb.M[j, t])
+            for t in self.pb.TIME:
+                costMaintenance += ((stn.a[j] - stn.b[j])
+                                    * m.pb.M[j, t])
+            costMaintenance += (m.pb.R[j, self.pb.T - self.pb.dT]
+                                / stn.Rmax[j]
+                                * (stn.a[j] - stn.b[j]))
+        return costMaintenance
+
+    def add_deg_constraints(self):
+        stn = self.stn
+        m = self.model
+        for j in stn.units:
+            m.cons.add(m.pb.R0transfer[j] == m.sb.R0[j, self.sb.T -
+                                                     self.sb.dT])
+            for i in stn.I[j]:
+                for k in stn.O[j]:
+                    rhs = 0
+                    for t in self.sb.TIME:
+                        rhs += m.sb.Rc[j, self.sb.T - self.sb.dT, i, k, t]
+                    m.cons.add(m.pb.Rctransfer[j, i, k] == rhs)
+
+    def add_blocks(self, TIMEs, TIMEp, decisionrule="continuous", **kwargs):
+        stn = self.stn
+        m = self.model
 
         # scheduling and planning block
         m.sb = pyomo.Block()
+        m.pb = pyomo.Block()
         self.sb = blockSchedulingRobust(m.sb, stn,
                                         np.array([t for t in TIMEs]),
-                                        self.Demand)
-        m.pb = pyomo.Block()
+                                        self.Demand,
+                                        decisionrule=decisionrule)
         self.pb = blockPlanningRobust(m.pb, stn,
                                       np.array([t for t in TIMEp]),
-                                      self.Demand)
-
-        # add continuity constraints to model
-        self.add_unit_constraints()
-        self.add_state_constraints()
-        self.add_deg_constraints()
-
-        # add objective function to model
-        self.add_objective_function()
+                                      self.Demand,
+                                      decisionrule=decisionrule)
 
 
 class StnStruct(object):
@@ -618,7 +690,7 @@ class StnStruct(object):
         self.units = set()          # set of unit names
         self.opmodes = set()        # set of operating mode names
 
-        self.U = 10000              # big U
+        self.U = 100                # big U
         self.eps = 0.1              # Maximum deviation for uncertain D's FIX!
 
         # dictionaries indexed by task name

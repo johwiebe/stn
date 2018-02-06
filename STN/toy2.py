@@ -47,7 +47,7 @@ stn.tsArc('Reaction_1',    'P1',      rho=1.0)
 stn.tsArc('Reaction_2',    'P2',      rho=1.0)
 
 # unit-task data
-stn.unit('Heater', 'Heating', Bmin=40, Bmax=100, tm=15, rmax=80,
+stn.unit('Heater', 'Heating', Bmin=40, Bmax=100, tm=8, rmax=80,
          rinit=43, a=600, b=300)
 stn.unit('Reactor', 'Reaction_1', Bmin=30, Bmax=140, tm=11, rmax=120,
          rinit=50, a=600, b=300)
@@ -70,25 +70,21 @@ dTs = 1
 Tp = 30*8
 dTp = 30
 TIMEs = range(0, Ts, dTs)
-TIMEp = range(Ts, Tp, dTp)
+TIMEp = range(0, Tp, dTp)
 
-# demand for Product P
-# demand_1 = [150, 88, 125, 67, 166]
 demand_1 = [150, 88, 125, 67, 166, 125, 302, 94, 300, 300, 300, 300]
 demand_2 = [50, 188, 131, 27, 241, 155, 122, 104, 300, 300, 300, 300]
-model.demand('P1', Ts-dTs, demand_1[0])
-model.demand('P2', Ts-dTs, demand_2[0])
+# model.demand('P1', Ts-dTs, demand_1[0])
+# model.demand('P2', Ts-dTs, demand_2[0])
 
 for i in range(0, len(TIMEp)):
-    model.demand('P1', TIMEp[i], demand_1[i+1])
-    model.demand('P2', TIMEp[i], demand_2[i+1])
+    model.demand('P1', TIMEp[i], demand_1[i])
+    model.demand('P2', TIMEp[i], demand_2[i])
 
 # build and solve model
-import ipdb; ipdb.set_trace()  # noqa
-model.build(TIMEs, TIMEp, objective="terminal")
-model.solve('cplex')
-
-# get results
-model.gantt()
-model.trace()
-model.trace_planning()
+model.solve([Ts, dTs, Tp, dTp],
+            solver="cplex",
+            objective="terminal",
+            periods=5,
+            prefix="toy2D",
+            rdir="/home/jw3617/STN/results")

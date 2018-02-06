@@ -4,6 +4,7 @@
 Deterministic model of STN with degradation. Based on Biondi et al 2017.
 '''
 import pyomo.environ as pyomo
+from pyomo.opt import SolverStatus, TerminationCondition
 import matplotlib.pyplot as plt
 import numpy as np
 import dill
@@ -17,6 +18,7 @@ class stnModel(object):
     def __init__(self):
         self.Demand = {}            # demand for products
         self.stn = StnStruct()
+        self.m_list = []
 
     def demand(self, state, time, Demand):
         self.Demand[state, time] = Demand
@@ -32,20 +34,29 @@ class stnModel(object):
                 for k in stn.O[j]:
                     # Add processing time of tasks started in scheduling
                     # horizon
+                    rhs2 = 0
+                    rhs3 = 0
                     for tprime in self.sb.TIME[self.sb.TIME
                                                >= self.sb.T
                                                - stn.p[i, j, k]
                                                + self.sb.dT]:
-                        rhs += (m.sb.W[i, j, k, tprime]
-                                * (stn.p[i, j, k]
-                                   - (self.sb.T - tprime)))
+                        rhs2 += (m.sb.W[i, j, k, tprime]
+                                 * (stn.p[i, j, k]
+                                    - (self.sb.T - tprime)))
+                        rhs += rhs2
+                        rhs3 += m.sb.B[i, j, k, tprime]
+                    m.cons.add(m.ptransfer[i, j, k] == rhs2)
+                    m.cons.add(m.Btransfer[i, j, k] == rhs3)
             # Add time for maintenance started in scheduling horizon
+            rhs2 = 0
             for tprime in self.sb.TIME[(self.sb.TIME
                                         >= self.sb.T
                                         - stn.tau[j]
                                         + self.sb.dT)]:
-                rhs += m.sb.M[j, tprime]*(stn.tau[j] - (self.sb.T - tprime))
-            m.cons.add(m.pb.Ntransfer[j] == rhs)
+                rhs2 += m.sb.M[j, tprime]*(stn.tau[j] - (self.sb.T - tprime))
+                rhs += rhs2
+            m.cons.add(m.pb.Ntransfer[j] == rhs)  # TODO: should this time?
+            m.cons.add(m.tautransfer[j] == rhs2)
 
     def add_state_constraints(self):
         """Add state continuity constraints to model."""
@@ -62,8 +73,8 @@ class stnModel(object):
                                          self.sb.T
                                          - stn.p[i, j, k]])
             # Subtract demand from last scheduling period
-            if (s, self.sb.T - self.sb.dT) in self.Demand:
-                rhs -= self.Demand[s, self.sb.T - self.sb.dT]
+            if (s, self.sb.TIME[0]) in self.Demand:
+                rhs -= self.Demand[s, self.sb.TIME[0]]
             m.cons.add(m.sb.Sfin[s] == rhs)
             m.cons.add(0 <= m.sb.Sfin[s] <= stn.C[s])
             # Calculate amounts transfered into planning period
@@ -172,20 +183,53 @@ class stnModel(object):
         stn = self.stn
         m = self.model
         m.sb = pyomo.Block()
-        self.sb = blockScheduling(m.sb, stn, np.array([t for t in TIMEs]),
+        self.sb = blockScheduling(m.sb, stn, TIMEs,
                                   self.Demand)
         m.pb = pyomo.Block()
-        self.pb = blockPlanning(m.pb, stn, np.array([t for t in TIMEp]),
+        self.pb = blockPlanning(m.pb, stn, TIMEp,
                                 self.Demand)
 
-    def build(self, TIMEs, TIMEp, objective="biondi", **kwargs):
+    def transfer_next_period(self):
+        m = self.model
+        stn = self.stn
+        # import ipdb; ipdb.set_trace()  # noqa
+
+        for s in stn.states:
+            stn.init[s] = m.sb.Sfin[s]()
+        for j in stn.units:
+            for i in stn.I[j]:
+                for k in stn.O[j]:
+                    stn.pinit[i, j, k] = m.ptransfer[i, j, k]()
+                    stn.Binit[i, j, k] = m.Btransfer[i, j, k]()
+                    stn.tauinit[j] = m.tautransfer[j]()
+            # stn.Rinit[j] = round(m.sb.R[j, self.sb.T - self.sb.dT]()*100)/100
+            # stn.Rinit[j] = round(m.sb.R[j, self.sb.T - self.sb.dT]())
+            stn.Rinit[j] = m.sb.R[j, self.sb.T - self.sb.dT]()
+
+    def build(self, T_list, objective="biondi", period=None, **kwargs):
         """Build STN model."""
+        assert period is not None
         self.model = pyomo.ConcreteModel()
         m = self.model
+        stn = self.stn
         m.cons = pyomo.ConstraintList()
+        m.ptransfer = pyomo.Var(stn.tasks, stn.units, stn.opmodes,
+                                domain=pyomo.NonNegativeReals)
+        m.Btransfer = pyomo.Var(stn.tasks, stn.units, stn.opmodes,
+                                domain=pyomo.NonNegativeReals)
+        m.tautransfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeReals)
 
         # scheduling and planning block
-        self.add_blocks(TIMEs, TIMEp, **kwargs)
+        Ts = T_list[0]
+        dTs = T_list[1]
+        Tp = T_list[2]
+        dTp = T_list[3]
+        Ts_start = period * Ts
+        Tp_start = (period + 1) * Ts
+        Ts = Ts_start + Ts
+        Tp = Tp_start + Tp
+        # self.add_blocks(TIMEs, TIMEp, **kwargs)
+        self.add_blocks([Ts_start, Ts, dTs], [Tp_start, Tp, dTp], **kwargs)
 
         # add continuity constraints to model
         self.add_unit_constraints()
@@ -200,19 +244,39 @@ class stnModel(object):
         else:
             raise KeyError("KeyError: unknown objective %s" % objective)
 
-    def solve(self, solver='cplex', prefix=''):
+    def solve(self, T_list, solver='cplex', prefix='', periods=1,
+              rdir='results', **kwargs):
         self.solver = pyomo.SolverFactory(solver)
         # self.solver.options['timelimit'] = 600
         self.solver.options['dettimelimit'] = 500000
         # self.solver.options['mipgap'] = 0.08
-        self.solver.solve(self.model,
-                          tee=True,
-                          logfile="results/"+prefix+"STN.log").write()
-        with open("results/"+prefix+'output.txt', 'w') as f:
-            f.write("STN Output:")
-            self.model.display(ostream=f)
-        with open("results/"+prefix+'STN.pyomo', 'wb') as dill_file:
-            dill.dump(self.model, dill_file)
+        prefix_old = prefix
+
+        for period in range(0, periods):
+            if periods > 1:
+                prefix = str(period) + prefix_old
+            self.build(T_list, period=period, **kwargs)
+            logfile = rdir + "/" + prefix + "STN.log"
+            results = self.solver.solve(self.model,
+                                        tee=True,
+                                        logfile=logfile)
+            results.write()
+            if ((results.solver.status == SolverStatus.ok) and
+                (results.solver.termination_condition ==
+                 TerminationCondition.optimal)):
+                with open(rdir+"/"+prefix+'output.txt', 'w') as f:
+                    f.write("STN Output:")
+                    self.model.display(ostream=f)
+                with open(rdir+"/"+prefix+'STN.pyomo', 'wb') as dill_file:
+                    dill.dump(self.model, dill_file)
+                self.gantt(prefix=prefix, rdir=rdir)
+                self.trace(prefix=prefix, rdir=rdir)
+                self.trace_planning(prefix=prefix, rdir=rdir)
+                if periods > 1:
+                    self.transfer_next_period()
+                    self.m_list.append(self.model)
+            else:
+                break
 
     def loadres(self, f="STN.pyomo"):
         with open(f, 'rb') as dill_file:
@@ -306,7 +370,8 @@ class stnModel(object):
     def getD(self):
         return self.D
 
-    def gantt(self, prefix=''):
+    def gantt(self, prefix='', rdir=None):
+        assert rdir is not None
         model = self.model
         stn = self.stn
 
@@ -331,6 +396,7 @@ class stnModel(object):
                         if self.model.sb.W[i, j, k, t]() > 0:
                             jstart[j] = min(jstart[j], t)
         jsorted = [j for (j, t) in sorted(jstart.items(),  key=lambda x: x[1])]
+        jsorted = sorted(stn.units)
 
         # number of horizontal bars to draw
         nbars = -1
@@ -352,7 +418,8 @@ class stnModel(object):
                     idx -= 1
                     if t == self.sb.TIME[0]:
                         ticks.append(idx)
-                        plt.plot([0, self.sb.T], [idx, idx], lw=24,
+                        plt.plot([self.sb.TIME[0], self.sb.T],
+                                 [idx, idx], lw=24,
                                  alpha=.3, color='y')
                         lbls.append("{0:s} -> {1:s}".format(j, i))
                     for k in stn.O[j]:
@@ -378,16 +445,17 @@ class stnModel(object):
                         plt.text(t+stn.tau[j]/2, idx, "Maintenance",
                                  weight='bold', ha='center', va='center')
 
-        plt.xlim(0, self.sb.T)
+        plt.xlim(self.sb.TIME[0], self.sb.T)
         plt.ylim(-nbars-0.5, 0)
         plt.gca().set_yticks(ticks)
         plt.gca().set_yticklabels(lbls)
         # plt.show();
-        plt.savefig("results/"+prefix+'gantt_scheduling.png')
+        plt.savefig(rdir+"/"+prefix+'gantt_scheduling.png')
 
         idx = 1
         lbls = []
         ticks = []
+        # TODO: This is stupid!
         col = {'Heating': 'green', 'Reaction_1': 'yellow',
                'Reaction_3': 'red', 'Reaction_2': 'orange',
                'Separation': 'blue'}
@@ -399,7 +467,8 @@ class stnModel(object):
             idx -= 1
             ticks.append(idx)
             lbls.append("{0:s}".format(j, i))
-            plt.plot([0, self.pb.T], [idx, idx], lw=24, alpha=.3, color='y')
+            plt.plot([self.pb.TIME[0], self.pb.T],
+                     [idx, idx], lw=24, alpha=.3, color='y')
             for t in self.pb.TIME:
                 tau = t
                 plt.axvline(t, color="black")
@@ -427,14 +496,14 @@ class stnModel(object):
                     plt.plot([tau+gap, tauNext-gap],
                              [idx, idx], 'k', lw=20, solid_capstyle='butt')
 
-        plt.xlim(0, self.pb.T)
+        plt.xlim(self.pb.TIME[0], self.pb.T)
         plt.ylim(-nbars-0.5, 0)
         plt.gca().set_yticks(ticks)
         plt.gca().set_yticklabels(lbls)
         plt.gca().set_xticks(self.pb.TIME)
-        plt.gca().set_xticklabels(self.pb.TIME/168)
+        plt.gca().set_xticklabels(np.round(100*self.pb.TIME/168)/100)
         # plt.show()
-        plt.savefig("results/"+prefix+'gannt_planning.png')
+        plt.savefig(rdir+"/"+prefix+'gantt_planning.png')
 
         # for j in stn.units:
         #     plt.plot(self.sb.TIME, [model.sb.R[j,t]() for t in self.sb.TIME])
@@ -454,15 +523,17 @@ class stnModel(object):
             # plt.bar(self.pb.TIME/168+1,
             #         [10*model.pb.M['Reactor_2',t]() for t in self.pb.TIME])
             # plt.show()
-            plt.savefig("results/"+prefix+s+'.png')
+            # plt.savefig(rdir+"/"+prefix+s+'.png')
+            plt.close("all")
 
-    def trace(self, prefix=''):
+    def trace(self, prefix='', rdir=None):
+        assert rdir is not None
         # abbreviations
         m = self.model
         stn = self.stn
 
         oldstdout = sys.stdout
-        sys.stdout = open("results/"+prefix+'trace_scheduling.txt', 'w')
+        sys.stdout = open(rdir+"/"+prefix+'trace_scheduling.txt', 'w')
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")
         for s in stn.states:
@@ -488,7 +559,7 @@ class stnModel(object):
                     for s in stn.S_[i]:
                         for k in stn.O[j]:
                             ts = t-stn.p[i, j, k]
-                            if ts >= 0:
+                            if ts >= self.sb.TIME[0]:
                                 tend = max(self.sb.TIME[self.sb.TIME <= ts])
                                 amt = (stn.rho_[(i, s)]
                                        * m.sb.B[i, j, k, tend]())
@@ -500,7 +571,7 @@ class stnModel(object):
                 fmt = 'Release {0:s} from {1:s}'
                 for i in stn.I[j]:
                     for k in stn.O[j]:
-                        if t-stn.p[i, j, k] >= 0:
+                        if t-stn.p[i, j, k] >= self.sb.TIME[0]:
                             tend = max(self.sb.TIME[self.sb.TIME
                                                     <= t
                                                     - stn.p[i, j, k]])
@@ -558,13 +629,14 @@ class stnModel(object):
 
         sys.stdout = oldstdout
 
-    def trace_planning(self, prefix=''):
+    def trace_planning(self, prefix='', rdir=None):
+        assert rdir is not None
         # abbreviations
         m = self.model
         stn = self.stn
 
         oldstdout = sys.stdout
-        sys.stdout = open("results/"+prefix+'trace_planning.txt', 'w')
+        sys.stdout = open(rdir+"/"+prefix+'trace_planning.txt', 'w')
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")
         for s in stn.states:
@@ -694,7 +766,7 @@ class StnStruct(object):
         self.opmodes = set()        # set of operating mode names
 
         self.U = 100                # big U
-        self.eps = 0.0              # Maximum deviation for uncertain D's FIX!
+        self.eps = 0.1              # Maximum deviation for uncertain D's FIX!
 
         # dictionaries indexed by task name
         self.S = {}                 # sets of states feeding each task (inputs)
@@ -716,6 +788,7 @@ class StnStruct(object):
         self.tau = {}               # time taken for maintenance on each unit
         self.a = {}                 # fixed maintenance cost for each unit
         self.b = {}                 # maintenance discount for each unit
+        self.tauinit = {}           # initial time of maintenance left
 
         # dictionaries indexed by (task, state)
         self.rho = {}               # input feed fractions
@@ -733,6 +806,8 @@ class StnStruct(object):
         # characterization of units indexed by (task, unit, operating mode)
         self.p = {}                 # task duration
         self.D = {}                 # wear
+        self.pinit = {}             # initial processing time left
+        self.Binit = {}             # initial amount being processed
 
         # dictionaries indexed by (task,task)
         self.changeoverTime = {}    # time required for task1 -> task2
@@ -775,7 +850,7 @@ class StnStruct(object):
 #        self.p[task] = max(self.p[task],dur)
 
     def unit(self, unit, task, Bmin=0, Bmax=float('inf'), cost=0, vcost=0,
-             tm=0, rmax=0, rinit=0, a=0, b=0):
+             tm=0, rmax=0, rinit=0, a=0, b=0, tauinit=0):
         if unit not in self.units:
             self.units.add(unit)
             self.I[unit] = set()
@@ -793,21 +868,24 @@ class StnStruct(object):
         self.Bmax[(task, unit)] = Bmax
         self.cost[(task, unit)] = cost
         self.vcost[(task, unit)] = vcost
-        self.tau[unit] = max(tm, self.tau[unit])
+        self.tau[unit] = max(tm, self.tau[unit])  # TODO: max is dumb
         self.Rmax[unit] = max(rmax, self.Rmax[unit])
         self.Rinit[unit] = max(rinit, self.Rinit[unit])
         self.a[unit] = max(a, self.a[unit])
         self.b[unit] = max(b, self.b[unit])
+        self.tauinit[unit] = tauinit
 
     def opmode(self, opmode):
         if opmode not in self.opmodes:
             self.opmodes.add(opmode)
 
-    def ijkdata(self, task, unit, opmode, dur=1, wear=0):
+    def ijkdata(self, task, unit, opmode, dur=1, wear=0, pinit=0, Binit=0):
         if opmode not in self.O[unit]:
             self.O[unit].add(opmode)
         self.p[task, unit, opmode] = dur
         self.D[task, unit, opmode] = wear
+        self.pinit[task, unit, opmode] = pinit
+        self.Binit[task, unit, opmode] = Binit
 
     def changeover(self, task1, task2, dur):
         self.changeoverTime[(task1, task2)] = dur
