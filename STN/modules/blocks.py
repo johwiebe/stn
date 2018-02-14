@@ -39,7 +39,7 @@ class stnBlock(object):
         self.add_vars(**kwargs)
         self.add_unit_constraints()
         self.add_state_constraints()
-        self.add_deg_constraints()
+        self.add_deg_constraints(**kwargs)
 
     def add_vars(self, **kwargs):
         raise NotImplementedError
@@ -50,7 +50,7 @@ class stnBlock(object):
     def add_state_constraints(self):
         raise NotImplementedError
 
-    def add_deg_constraints(self):
+    def add_deg_constraints(self, **kwargs):
         raise NotImplementedError
 
 
@@ -131,7 +131,7 @@ class blockScheduling(stnBlock):
                 b.cons.add(b.S[s, t] == rhs)
                 rhs = b.S[s, t]
 
-    def add_deg_constraints(self):
+    def add_deg_constraints(self, **kwargs):
         """Add residual life constraints to block"""
         b = self.b
         stn = self.stn
@@ -189,7 +189,25 @@ class blockSchedulingRobust(blockScheduling):
 
         super().__init__(b, stn, TIME, Demand, **kwargs)
 
-    def calc_nominal_R(self):
+    def calc_nominal_R(self, tindexed=None):
+        assert tindexed is not None
+        b = self.b
+        stn = self.stn
+
+        for j in stn.units:
+            for t in self.TIME:
+                rhs = b.R0[j, t]
+                for i in stn.I[j]:
+                    for k in stn.O[j]:  # TODO: Fix this for not time indexed
+                        if tindexed:
+                            for tprime in self.TIME[self.TIME <= t]:
+                                rhs += stn.D[i, j, k]*b.Rc[j, t, i, k, tprime]
+                        else:
+                            rhs += stn.D[i, j, k]*b.Rc[j, t, i, k]
+                b.cons.add(b.R[j, t] == rhs)
+
+    def calc_max_R(self, tindexed=None):
+        assert tindexed is not None
         b = self.b
         stn = self.stn
 
@@ -198,21 +216,20 @@ class blockSchedulingRobust(blockScheduling):
                 rhs = b.R0[j, t]
                 for i in stn.I[j]:
                     for k in stn.O[j]:
-                        for tprime in self.TIME[self.TIME <= t]:
-                            rhs += stn.D[i, j, k] * b.Rc[j, t, i, k, tprime]
-                b.cons.add(b.R[j, t] == rhs)
+                        if tindexed:
+                            for tprime in self.TIME[self.TIME <= t]:
+                                rhs += (stn.D[i, j, k]
+                                        * (1 + stn.eps)
+                                        * b.Rc[j, t, i, k, tprime])
+                        else:
+                            rhs += (stn.D[i, j, k]
+                                    * (1 + stn.eps)
+                                    * b.Rc[j, t, i, k])
+                b.cons.add(b.Rmax[j, t] == rhs)
 
-    def add_vars(self, decisionrule=None, **kwargs):
-        """Define affine decision rule for residual lifetime."""
+    def add_vars_tindexed(self, domain):
         b = self.b
         stn = self.stn
-
-        assert decisionrule is not None
-
-        if decisionrule == "continuous":
-            domain = pyomo.NonNegativeReals
-        elif decisionrule == "integer":
-            domain = pyomo.NonNegativeIntegers
 
         # pyomo.Variables for residual life affine decision rule
         b.Rc = pyomo.Var(stn.units, self.TIME, stn.tasks, stn.opmodes,
@@ -228,17 +245,63 @@ class blockSchedulingRobust(blockScheduling):
         b.ud = pyomo.Var([1, 2, 3, 4], stn.units, self.TIME, stn.tasks,
                          stn.opmodes, self.TIME,
                          domain=pyomo.NonNegativeReals)
+
+    def add_vars_not_tindexed(self, domain):
+        b = self.b
+        stn = self.stn
+
+        # pyomo.Variables for residual life affine decision rule
+        b.Rc = pyomo.Var(stn.units, self.TIME, stn.tasks, stn.opmodes,
+                         domain=domain)
+
+        b.R0 = pyomo.Var(stn.units, self.TIME,
+                         domain=pyomo.NonNegativeReals)
+
+        # Dual variables for residual life constraints
+        b.ld = pyomo.Var([1, 2, 3, 4], stn.units, self.TIME, stn.tasks,
+                         stn.opmodes,
+                         domain=pyomo.NonNegativeReals)
+        b.ud = pyomo.Var([1, 2, 3, 4], stn.units, self.TIME, stn.tasks,
+                         stn.opmodes,
+                         domain=pyomo.NonNegativeReals)
+
+    def add_vars(self, tindexed=None, decisionrule=None, **kwargs):
+        """Define affine decision rule for residual lifetime."""
+        assert decisionrule is not None
+        assert tindexed is not None
+        b = self.b
+        stn = self.stn
+
+        if decisionrule == "continuous":
+            domain = pyomo.NonNegativeReals
+        elif decisionrule == "integer":
+            domain = pyomo.NonNegativeIntegers
+
+        if tindexed:
+            self.add_vars_tindexed(domain)
+        else:
+            self.add_vars_not_tindexed(domain)
+        b.Rmax = pyomo.Var(stn.units, self.TIME,
+                           domain=pyomo.NonNegativeReals)
         super().add_vars()
 
     def define_block(self, decisionrule=None, **kwargs):
         # Define affine decision rule
         super().define_block(decisionrule=decisionrule, **kwargs)
-        self.calc_nominal_R()
+        self.calc_nominal_R(**kwargs)
+        self.calc_max_R(**kwargs)
         assert decisionrule is not None
         if decisionrule == "integer":
             self.add_int_decision_rule_cons()
 
-    def add_deg_constraints(self):
+    def add_deg_constraints(self, tindexed=None, **kwargs):
+        assert tindexed is not None
+        if tindexed:
+            self.add_deg_constraints_tindexed()
+        else:
+            self.add_deg_constraints_not_tindexed()
+
+    def add_deg_constraints_tindexed(self):
         """Add robust degredation constraints.
 
         Note:
@@ -361,6 +424,115 @@ class blockSchedulingRobust(blockScheduling):
                 rhs = -b.R0[j, t] + R0Last
                 b.cons.add(lhs <= rhs)
 
+    def add_deg_constraints_not_tindexed(self):
+        """Add robust degredation constraints.
+
+        Note:
+            The residual lifetime R has a different interpretation in the
+            robust implementation. It increases from 0 to Rmax instead of
+            decreasing from Rmax to 0
+
+        """
+        b = self.b
+        stn = self.stn
+
+        for j in stn.units:
+            # RcLast = stn.Rinit[j]
+            for t in self.TIME:
+                # constraints on F[j,t] and R[j,t]
+                b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+                b.cons.add(b.F[j, t] <= stn.Rmax[j] - b.R[j, t])
+                b.cons.add(b.F[j, t] >= stn.Rmax[j]*b.M[j, t] - b.R[j, t])
+                b.cons.add(b.R[j, t] <= stn.Rmax[j])
+                # b.cons.add(stn.Rmax[j]*b.M[j, t] <= b.R[j, t])
+                # residual life balance
+                # inequality 1
+                lhs = 0
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        lhs += (stn.D[i, j, k]
+                                * ((1 + stn.eps)
+                                   * b.ud[1, j, t, i, k]
+                                   - (1 - stn.eps)
+                                   * b.ld[1, j, t, i, k]))
+                        b.cons.add(b.ud[1, j, t, i, k] -
+                                   b.ld[1, j, t, i, k] >= -
+                                   b.Rc[j, t, i, k])
+                rhs = b.R0[j, t]
+                b.cons.add(lhs <= rhs)
+
+                # inequality 2
+                lhs = 0
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        lhs += (stn.D[i, j, k]
+                                * ((1 + stn.eps)
+                                   * b.ud[2, j, t, i, k]
+                                   - (1 - stn.eps)
+                                   * b.ld[2, j, t, i, k]))
+                        b.cons.add(b.ud[2, j, t, i, k] -
+                                   b.ld[2, j, t, i, k] >=
+                                   b.Rc[j, t, i, k])
+                rhs = -b.R0[j, t] + stn.Rmax[j]*(1 - b.M[j, t])
+                # rhs = -b.R0[j,t] + stn.Rmax[j]
+                b.cons.add(lhs <= rhs)
+
+                # inequality 3
+                lhs = 0
+                # in the first time period R = Rinit
+                if (t == self.TIME[0]):
+                    R0Last = stn.Rinit[j]
+                    RcLast = 0
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        lhs += (stn.D[i, j, k]
+                                * ((1 + stn.eps)
+                                   * b.ud[3, j, t, i, k]
+                                   - (1 - stn.eps)
+                                   * b.ld[3, j, t, i, k]))
+
+                        if (t > self.TIME[0]):
+                            R0Last = b.R0[j, t-self.dT]
+                            RcLast = b.Rc[j, t-self.dT, i, k]
+
+                        b.cons.add(b.ud[3, j, t, i, k]
+                                   - b.ld[3, j, t, i, k]
+                                   >=
+                                   RcLast
+                                   - b.Rc[j, t, i, k]
+                                   + b.W[i, j, k, t])
+                rhs = (b.R0[j, t] - R0Last
+                       # + stn.Rmax[j])
+                       + b.M[j, t]*stn.Rmax[j])
+                b.cons.add(lhs <= rhs)
+
+                # inequality 4
+                lhs = 0
+                # in the first time period R = Rinit
+                if (t == self.TIME[0]):
+                    R0Last = stn.Rinit[j]
+                    RcLast = 0
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        lhs += (stn.D[i, j, k]
+                                * ((1 + stn.eps)
+                                   * b.ud[4, j, t, i, k]
+                                   - (1 - stn.eps)
+                                   * b.ld[4, j, t, i, k]))
+
+                        if (t > self.TIME[0]):
+                            R0Last = b.R0[j, t-self.dT]
+                            RcLast = b.Rc[j, t-self.dT, i, k]
+
+                        b.cons.add(b.ud[4, j, t, i, k]
+                                   - b.ld[4, j, t, i, k]
+                                   >=
+                                   b.Rc[j, t, i, k]
+                                   - RcLast
+                                   - b.W[i, j, k, t])
+                rhs = -b.R0[j, t] + R0Last
+                b.cons.add(lhs <= rhs)
+
     def add_int_decision_rule_cons(self):
         """Define affine decision rule for residual lifetime."""
         b = self.b
@@ -441,7 +613,7 @@ class blockPlanning(stnBlock):
                 b.cons.add(b.S[s, t] == rhs)
                 rhs = b.S[s, t]
 
-    def add_deg_constraints(self):
+    def add_deg_constraints(self, **kwargs):
         """Add residual life constraints to block."""
         b = self.b
         stn = self.stn
@@ -503,7 +675,8 @@ class blockPlanningRobust(blockPlanning):
     def __init__(self, b, stn, TIME, Demand, **kwargs):
         super().__init__(b, stn, TIME, Demand, **kwargs)
 
-    def calc_nominal_R(self):
+    def calc_nominal_R(self, tindexed=None):
+        assert tindexed is not None
         b = self.b
         stn = self.stn
 
@@ -512,20 +685,31 @@ class blockPlanningRobust(blockPlanning):
                 rhs = b.R0[j, t]
                 for i in stn.I[j]:
                     for k in stn.O[j]:
-                        for tprime in self.TIME[self.TIME <= t]:
-                            rhs += stn.D[i, j, k] * b.Rc[j, t, i, k, tprime]
+                        if tindexed:
+                            for tprime in self.TIME[self.TIME <= t]:
+                                rhs += stn.D[i, j, k]*b.Rc[j, t, i, k, tprime]
+                        else:
+                            rhs += stn.D[i, j, k]*b.Rc[j, t, i, k]
                 b.cons.add(b.R[j, t] == rhs)
 
-    def add_vars(self, decisionrule=None, **kwargs):
-        """Define affine decision rule for residual lifetime."""
-        b = self.b
-        stn = self.stn
-
+    def add_vars(self, decisionrule=None, tindexed=None, **kwargs):
         assert decisionrule is not None
+        assert tindexed is not None
         if decisionrule == "continuous":
             domain = pyomo.NonNegativeReals
         elif decisionrule == "integer":
             domain = pyomo.NonNegativeIntegers
+
+        if tindexed:
+            self.add_vars_tindexed(domain)
+        else:
+            self.add_vars_not_tindexed(domain)
+        super().add_vars(**kwargs)
+
+    def add_vars_tindexed(self, domain):
+        """Define affine decision rule for residual lifetime."""
+        b = self.b
+        stn = self.stn
 
         # pyomo.Variables for residual life affine decision rule
         b.R0 = pyomo.Var(stn.units, self.TIME,
@@ -545,17 +729,46 @@ class blockPlanningRobust(blockPlanning):
                          stn.opmodes, self.TIME,
                          domain=pyomo.NonNegativeReals)
 
-        super().add_vars()
+    def add_vars_not_tindexed(self, domain):
+        """Define affine decision rule for residual lifetime."""
+        b = self.b
+        stn = self.stn
+
+        # pyomo.Variables for residual life affine decision rule
+        b.R0 = pyomo.Var(stn.units, self.TIME,
+                         domain=pyomo.NonNegativeReals)
+        b.Rc = pyomo.Var(stn.units, self.TIME, stn.tasks, stn.opmodes,
+                         domain=domain)
+
+        b.R0transfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeReals)
+        b.Rctransfer = pyomo.Var(stn.units, stn.tasks, stn.opmodes,
+                                 domain=domain)
+
+        # Dual variables for residual life constraints
+        b.ld = pyomo.Var([1, 2, 3], stn.units, self.TIME, stn.tasks,
+                         stn.opmodes,
+                         domain=pyomo.NonNegativeReals)
+        b.ud = pyomo.Var([1, 2, 3], stn.units, self.TIME, stn.tasks,
+                         stn.opmodes,
+                         domain=pyomo.NonNegativeReals)
 
     def define_block(self, decisionrule=None, **kwargs):
         # Define affine decision rule
         super().define_block(decisionrule=decisionrule, **kwargs)
-        self.calc_nominal_R()
+        self.calc_nominal_R(**kwargs)
         assert decisionrule is not None
         # if decisionrule == "integer":
         #     self.add_int_decision_rule_cons()
 
-    def add_deg_constraints(self):
+    def add_deg_constraints(self, tindexed=None, **kwargs):
+        assert tindexed is not None
+
+        if tindexed:
+            self.add_deg_constraints_tindexed()
+        else:
+            self.add_deg_constraints_not_tindexed()
+
+    def add_deg_constraints_tindexed(self, **kwargs):
         """Add robust degredation constraints.
 
         Note:
@@ -653,6 +866,92 @@ class blockPlanningRobust(blockPlanning):
                                            - b.ld[3, j, t, i, k, tprime]
                                            >= -RcLast
                                            + b.Rc[j, t, i, k, tprime])
+                rhs = -b.R0[j, t] + R0Last
+                b.cons.add(lhs <= rhs)
+
+    def add_deg_constraints_not_tindexed(self, **kwargs):
+        """Add robust degredation constraints.
+
+        Note:
+            The residual lifetime R has a different interpretation in the
+            robust implementation. It increases from 0 to Rmax instead of
+            decreasing from Rmax to 0
+
+        """
+        b = self.b
+        stn = self.stn
+
+        for j in stn.units:
+            for t in self.TIME:
+                # constraints on R and F
+                b.cons.add(0 <= b.R[j, t] <= stn.Rmax[j])
+                b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+
+                # inequality 1
+                lhs = 0
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        lhs += (stn.D[i, j, k]
+                                * ((1 + stn.eps)
+                                   * b.ud[1, j, t, i, k]
+                                   - (1 - stn.eps)
+                                   * b.ld[1, j, t, i, k]))
+                        b.cons.add(b.ud[1, j, t, i, k] -
+                                   b.ld[1, j, t, i, k] >=
+                                   b.Rc[j, t, i, k])
+                rhs = -b.R0[j, t] + stn.Rmax[j]
+                b.cons.add(lhs <= rhs)
+
+                # inequality 2
+                lhs = 0
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        lhs += (stn.D[i, j, k]
+                                * ((1 + stn.eps)
+                                   * b.ud[2, j, t, i, k]
+                                   - (1 - stn.eps)
+                                   * b.ld[2, j, t, i, k]))
+
+                        # in the first time period R = Rtransfer
+                        if (t == self.TIME[0]):
+                            R0Last = b.R0transfer[j]
+                            RcLast = b.Rctransfer[j, i, k]
+                        else:
+                            R0Last = b.R0[j, t-self.dT]
+                            RcLast = b.Rc[j, t-self.dT, i, k]
+
+                        b.cons.add(b.ud[2, j, t, i, k]
+                                   - b.ld[2, j, t, i, k]
+                                   >= RcLast
+                                   - b.Rc[j, t, i, k]
+                                   + b.N[i, j, k, t])
+                rhs = (b.R0[j, t] - R0Last
+                       + b.M[j, t]*stn.Rmax[j])
+                b.cons.add(lhs <= rhs)
+
+                # inequality 3
+                lhs = 0
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        lhs += (stn.D[i, j, k]
+                                * ((1 + stn.eps)
+                                   * b.ud[3, j, t, i, k]
+                                   - (1 - stn.eps)
+                                   * b.ld[3, j, t, i, k]))
+
+                        # in the first time period R = Rtransfer
+                        if (t == self.TIME[0]):
+                            R0Last = b.R0transfer[j]
+                            RcLast = b.Rctransfer[j, i, k]
+                        else:
+                            R0Last = b.R0[j, t-self.dT]
+                            RcLast = b.Rc[j, t-self.dT, i, k]
+
+                        b.cons.add(b.ud[3, j, t, i, k]
+                                   - b.ld[3, j, t, i, k]
+                                   >= -RcLast
+                                   + b.Rc[j, t, i, k]
+                                   - b.N[i, j, k, t])
                 rhs = -b.R0[j, t] + R0Last
                 b.cons.add(lhs <= rhs)
 

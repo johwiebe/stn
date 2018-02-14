@@ -87,4 +87,5 @@ model.solve([Ts, dTs, Tp, dTp],
             objective="terminal",
             periods=5,
             prefix="toy2D",
-            rdir="/home/jw3617/STN/results")
+            rdir="/home/jw3617/STN/results",
+            tindexed=False)

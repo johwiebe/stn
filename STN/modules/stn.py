@@ -23,6 +23,9 @@ class stnModel(object):
     def demand(self, state, time, Demand):
         self.Demand[state, time] = Demand
 
+    def uncertainty(self, eps):
+        self.stn.eps = eps
+
     def add_unit_constraints(self):
         """Add unit allocation continuity constraints to model."""
         m = self.model
@@ -118,7 +121,7 @@ class stnModel(object):
                                     - stn.b[j]*m.pb.F[j, t]/stn.Rmax[j])
         return costMaintenance
 
-    def add_deg_constraints(self):
+    def add_deg_constraints(self, **kwargs):
         """Add residual life continuity constraints to model."""
         stn = self.stn
         m = self.model
@@ -184,12 +187,12 @@ class stnModel(object):
         m = self.model
         m.sb = pyomo.Block()
         self.sb = blockScheduling(m.sb, stn, TIMEs,
-                                  self.Demand)
+                                  self.Demand, **kwargs)
         m.pb = pyomo.Block()
         self.pb = blockPlanning(m.pb, stn, TIMEp,
-                                self.Demand)
+                                self.Demand, **kwargs)
 
-    def transfer_next_period(self):
+    def transfer_next_period(self, deg_continuity="max", **kwargs):
         m = self.model
         stn = self.stn
         # import ipdb; ipdb.set_trace()  # noqa
@@ -204,7 +207,10 @@ class stnModel(object):
                     stn.tauinit[j] = m.tautransfer[j]()
             # stn.Rinit[j] = round(m.sb.R[j, self.sb.T - self.sb.dT]()*100)/100
             # stn.Rinit[j] = round(m.sb.R[j, self.sb.T - self.sb.dT]())
-            stn.Rinit[j] = m.sb.R[j, self.sb.T - self.sb.dT]()
+            if deg_continuity == "max":  # TODO: this should be in robust model
+                stn.Rinit[j] = m.sb.Rmax[j, self.sb.T - self.sb.dT]()
+            elif deg_continuity == "nominal":
+                stn.Rinit[j] = m.sb.R[j, self.sb.T - self.sb.dT]()
 
     def build(self, T_list, objective="biondi", period=None, **kwargs):
         """Build STN model."""
@@ -234,7 +240,7 @@ class stnModel(object):
         # add continuity constraints to model
         self.add_unit_constraints()
         self.add_state_constraints()
-        self.add_deg_constraints()
+        self.add_deg_constraints(**kwargs)
 
         # add objective function to model
         if objective == "biondi":
@@ -273,7 +279,7 @@ class stnModel(object):
                 self.trace(prefix=prefix, rdir=rdir)
                 self.trace_planning(prefix=prefix, rdir=rdir)
                 if periods > 1:
-                    self.transfer_next_period()
+                    self.transfer_next_period(**kwargs)
                     self.m_list.append(self.model)
             else:
                 break
@@ -484,10 +490,10 @@ class stnModel(object):
                             plt.plot([tau+gap, tauNext-gap],
                                      [idx, idx], color=col[i],
                                      lw=20, solid_capstyle='butt')
-                            txt = "{0:.2f}".format(model.pb.A[i, j, t]())
-                            # plt.text(t+p[i, j, k]/2,  idx,
-                            #          txt, color=col[k],
-                            #          weight='bold', ha='center', va='center')
+                            txt = "{0:d}".format(int(model.pb.N[i, j, k, t]()))
+                            plt.text((tau+tauNext)/2,  idx,
+                                     txt,  # color=col[k],
+                                     weight='bold', ha='center', va='center')
                             tau = tauNext
                 if model.pb.M[j, t]() > 0.5:
                     tauNext = tau + stn.tau[j]
@@ -707,6 +713,12 @@ class stnModelRobust(stnModel):
     def __init__(self):
         super().__init__()
 
+    def build(self, T_list, objective="biondi", period=None, tindexed=True,
+              **kwargs):
+        assert period is not None
+        super().build(T_list, objective=objective, period=period,
+                      tindexed=tindexed, **kwargs)
+
     def calc_cost_maintenance_terminal(self):
         stn = self.stn
         m = self.model
@@ -723,7 +735,8 @@ class stnModelRobust(stnModel):
                                 * (stn.a[j] - stn.b[j]))
         return costMaintenance
 
-    def add_deg_constraints(self):
+    def add_deg_constraints(self, tindexed=None, **kwargs):
+        assert tindexed is not None
         stn = self.stn
         m = self.model
         for j in stn.units:
@@ -732,8 +745,11 @@ class stnModelRobust(stnModel):
             for i in stn.I[j]:
                 for k in stn.O[j]:
                     rhs = 0
-                    for t in self.sb.TIME:
-                        rhs += m.sb.Rc[j, self.sb.T - self.sb.dT, i, k, t]
+                    if tindexed:
+                        for t in self.sb.TIME:
+                            rhs += m.sb.Rc[j, self.sb.T - self.sb.dT, i, k, t]
+                    else:
+                        rhs += m.sb.Rc[j, self.sb.T - self.sb.dT, i, k]
                     m.cons.add(m.pb.Rctransfer[j, i, k] == rhs)
 
     def add_blocks(self, TIMEs, TIMEp, decisionrule="continuous", **kwargs):
@@ -750,11 +766,13 @@ class stnModelRobust(stnModel):
         self.sb = blockSchedulingRobust(m.sb, stn,
                                         np.array([t for t in TIMEs]),
                                         self.Demand,
-                                        decisionrule=decisionrule)
+                                        decisionrule=decisionrule,
+                                        **kwargs)
         self.pb = blockPlanningRobust(m.pb, stn,
                                       np.array([t for t in TIMEp]),
                                       self.Demand,
-                                      decisionrule=decisionrule)
+                                      decisionrule=decisionrule,
+                                      **kwargs)
 
 
 class StnStruct(object):
@@ -766,7 +784,7 @@ class StnStruct(object):
         self.opmodes = set()        # set of operating mode names
 
         self.U = 100                # big U
-        self.eps = 0.1              # Maximum deviation for uncertain D's FIX!
+        self.eps = 0.0              # Maximum deviation for uncertain D's FIX!
 
         # dictionaries indexed by task name
         self.S = {}                 # sets of states feeding each task (inputs)
