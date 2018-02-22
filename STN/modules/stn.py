@@ -192,7 +192,7 @@ class stnModel(object):
         self.pb = blockPlanning(m.pb, stn, TIMEp,
                                 self.Demand, **kwargs)
 
-    def transfer_next_period(self, deg_continuity="max", **kwargs):
+    def transfer_next_period(self, **kwargs):
         m = self.model
         stn = self.stn
         # import ipdb; ipdb.set_trace()  # noqa
@@ -207,10 +207,7 @@ class stnModel(object):
                     stn.tauinit[j] = m.tautransfer[j]()
             # stn.Rinit[j] = round(m.sb.R[j, self.sb.T - self.sb.dT]()*100)/100
             # stn.Rinit[j] = round(m.sb.R[j, self.sb.T - self.sb.dT]())
-            if deg_continuity == "max":  # TODO: this should be in robust model
-                stn.Rinit[j] = m.sb.Rmax[j, self.sb.T - self.sb.dT]()
-            elif deg_continuity == "nominal":
-                stn.Rinit[j] = m.sb.R[j, self.sb.T - self.sb.dT]()
+            stn.Rinit[j] = m.sb.R[j, self.sb.T - self.sb.dT]()
 
     def build(self, T_list, objective="biondi", period=None, **kwargs):
         """Build STN model."""
@@ -251,11 +248,15 @@ class stnModel(object):
             raise KeyError("KeyError: unknown objective %s" % objective)
 
     def solve(self, T_list, solver='cplex', prefix='', periods=1,
-              rdir='results', **kwargs):
+              rdir='results', solverparams=None, **kwargs):
         self.solver = pyomo.SolverFactory(solver)
         # self.solver.options['timelimit'] = 600
-        self.solver.options['dettimelimit'] = 500000
-        # self.solver.options['mipgap'] = 0.08
+        if solverparams is not None:
+            for key, value in solverparams.items():
+                self.solver.options[key] = value
+        # self.solver.options['dettimelimit'] = 500000
+        # self.solver.options['mipgap'] = 0.05
+        # self.solver.options["mip_strategy_heuristicfreq"] = 10
         prefix_old = prefix
 
         for period in range(0, periods):
@@ -773,6 +774,14 @@ class stnModelRobust(stnModel):
                                       self.Demand,
                                       decisionrule=decisionrule,
                                       **kwargs)
+
+    def transfer_next_period(self, deg_continuity="max", **kwargs):
+        stn = self.stn
+        m = self.model
+        super().transfer_next_period(**kwargs)
+        for j in stn.units:
+            if deg_continuity == "max":  # TODO: this should be in robust model
+                stn.Rinit[j] = m.sb.Rmax[j, self.sb.T - self.sb.dT]()
 
 
 class StnStruct(object):

@@ -292,7 +292,7 @@ class blockSchedulingRobust(blockScheduling):
         self.calc_max_R(**kwargs)
         assert decisionrule is not None
         if decisionrule == "integer":
-            self.add_int_decision_rule_cons()
+            self.add_int_decision_rule_cons(decisionrule=decisionrule)
 
     def add_deg_constraints(self, tindexed=None, **kwargs):
         assert tindexed is not None
@@ -533,26 +533,47 @@ class blockSchedulingRobust(blockScheduling):
                 rhs = -b.R0[j, t] + R0Last
                 b.cons.add(lhs <= rhs)
 
-    def add_int_decision_rule_cons(self):
+    def add_int_decision_rule_cons(self, tindexed=None):
         """Define affine decision rule for residual lifetime."""
+        assert tindexed is not None
         b = self.b
         stn = self.stn
 
         # add constraints for decision rule
-        for t in self.TIME:
-            for j in stn.units:
-                for i in stn.I[j]:
-                    for k in stn.O[j]:
-                        b.cons.add(b.Rc[j, t, i, k, t] == b.W[i, j, k, t])
-                        b.cons.add(b.Rc[j, t, i, k, t] <= 1 - b.M[j, t])
-                        for tprime in self.TIME[self.TIME < t]:
-                            b.cons.add(b.Rc[j, t, i, k, tprime]
-                                       >= b.Rc[j, t - self.dT, i, k, tprime]
-                                       - b.M[j, t])
-                            b.cons.add(b.Rc[j, t, i, k, tprime]
-                                       <= 1 - b.M[j, t])
-                            b.cons.add(b.Rc[j, t, i, k, tprime]
-                                       <= b.Rc[j, t - self.dT, i, k, tprime])
+        if tindexed:
+            for t in self.TIME:
+                for j in stn.units:
+                    for i in stn.I[j]:
+                        for k in stn.O[j]:
+                            b.cons.add(b.Rc[j, t, i, k, t] == b.W[i, j, k, t])
+                            b.cons.add(b.Rc[j, t, i, k, t] <= 1 - b.M[j, t])
+                            for tprime in self.TIME[self.TIME < t]:
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           >= b.Rc[j, t - self.dT,
+                                                   i, k, tprime]
+                                           - b.M[j, t])
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           <= 1 - b.M[j, t])
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           <= b.Rc[j, t - self.dT,
+                                                   i, k, tprime])
+        else:
+            for t in self.TIME:
+                for j in stn.units:
+                    for i in stn.I[j]:
+                        for k in stn.O[j]:
+                            b.cons.add(b.Rc[j, t, i, k] == b.W[i, j, k, t])
+                            b.cons.add(b.Rc[j, t, i, k] <= 1 - b.M[j, t])
+                            for tprime in self.TIME[self.TIME < t]:
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           >= b.Rc[j, t - self.dT,
+                                                   i, k, tprime]
+                                           - b.M[j, t])
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           <= 1 - b.M[j, t])
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           <= b.Rc[j, t - self.dT,
+                                                   i, k, tprime])
 
 
 class blockPlanning(stnBlock):
@@ -588,7 +609,8 @@ class blockPlanning(stnBlock):
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         b.cons.add(b.N[i, j, k, t]
-                                   <= stn.U*b.Mode[j, k, t])
+                                   # <= stn.U*b.Mode[j, k, t])
+                                   <= b.dT/stn.p[i, j, k]*b.Mode[j, k, t])
                 b.cons.add(sum([b.Mode[j, k, t] for k in stn.O[j]]) == 1)
                 lhs = 0  # set lhs to zero for next time period
 

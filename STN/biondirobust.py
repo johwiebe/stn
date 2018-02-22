@@ -8,7 +8,8 @@ Created on Mon Oct  9 08:37:40 2017
 
 import sys
 sys.path.append('../STN/modules')
-from stn_deg_det import stnModelRobust # noqa
+from stn import stnModelRobust # noqa
+import deg  # noqa
 
 # create instance
 model = stnModelRobust()
@@ -91,23 +92,37 @@ demand_1 = [150, 88, 125, 67, 166, 203, 90, 224, 174, 126, 66, 119, 234, 64,
             103, 77, 132, 186, 174, 239, 124, 194, 91, 228]
 demand_2 = [200, 150, 197, 296, 191, 193, 214, 294, 247, 313, 226, 121, 197,
             242, 220, 342, 355, 320, 335, 298, 252, 222, 324, 337]
+demand_1 = [150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            103, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+demand_2 = [200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            242, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+# demand_1 = [0, 88, 125, 67, 166, 203, 90, 224, 174, 126, 66, 119, 234, 64,
+#            0, 77, 132, 186, 174, 239, 124, 194, 91, 228]
+# demand_2 = [0, 150, 197, 296, 191, 193, 214, 294, 247, 313, 226, 121, 197,
+#            0, 220, 342, 355, 320, 335, 298, 252, 222, 324, 337]
 
 Ts = 168
 dTs = 3
 Tp = 168*24
 dTp = 168
 TIMEs = range(0, Ts, dTs)
-TIMEp = range(Ts, Tp, dTp)
-
-model.demand('Product_1', Ts-dTs, demand_1[0])
-model.demand('Product_2', Ts-dTs, demand_2[0])
+TIMEp = range(0, Tp, dTp)
 
 for i in range(0, len(TIMEp)):
-    model.demand('Product_1', TIMEp[i], demand_1[i+1])
-    model.demand('Product_2', TIMEp[i], demand_2[i+1])
+    model.demand('Product_1', TIMEp[i], demand_1[i])
+    model.demand('Product_2', TIMEp[i], demand_2[i])
 
-model.build(TIMEs, TIMEp)
-model.solve('cplex')
-model.gantt()
-model.trace()
-model.trace_planning()
+model.uncertainty(0.5)
+model.solve([Ts, dTs, Tp, dTp],
+            solver="cplex",
+            objective="terminal",
+            decisionrule="continuous",
+            periods=5,
+            prefix="biondiR",
+            rdir="/home/jw3617/STN/results",
+            tindexed=False)
+
+print(deg.simulate_deg(10000, model, "Reactor_1", Sinit=100))
+deg.simulate_deg(10000, model, "Reactor_2", Sinit=40)
+deg.simulate_deg(10000, model, "Heater", Sinit=50)
+deg.simulate_deg(10000, model, "Still", Sinit=60)

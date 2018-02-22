@@ -8,7 +8,7 @@ Created on Mon Oct  9 08:37:40 2017
 
 import sys
 sys.path.append('../STN/modules')
-from stn_deg_det import stnModel # noqa
+from stn import stnModel # noqa
 
 # create instance
 model = stnModel()
@@ -97,17 +97,17 @@ dTs = 3
 Tp = 168*24
 dTp = 168
 TIMEs = range(0, Ts, dTs)
-TIMEp = range(Ts, Tp, dTp)
-
-model.demand('Product_1', Ts-dTs, demand_1[0])
-model.demand('Product_2', Ts-dTs, demand_2[0])
+TIMEp = range(0, Tp, dTp)
 
 for i in range(0, len(TIMEp)):
-    model.demand('Product_1', TIMEp[i], demand_1[i+1])
-    model.demand('Product_2', TIMEp[i], demand_2[i+1])
+    model.demand('Product_1', TIMEp[i], demand_1[i])
+    model.demand('Product_2', TIMEp[i], demand_2[i])
 
-model.build(TIMEs, TIMEp)
-model.solve('cplex')
-model.gantt()
-model.trace()
-model.trace_planning()
+solparams = {"timelimit": 60, "mipgap": 0.5}
+model.solve([Ts, dTs, Tp, dTp],
+            solver="cplex",
+            solverparams=solparams,
+            objective="terminal",
+            periods=5,
+            prefix="biondiD",
+            rdir="/home/jw3617/STN/results")
