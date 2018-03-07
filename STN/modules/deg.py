@@ -27,6 +27,88 @@ def check_for_task(m, stn, dt, j, ti):
     return [D, sd, tend, M]
 
 
+def get_profile(model, j, dt=1/10, N=1, Sinit=0, S0=0):
+    stn = model.stn
+    Ns = np.floor(model.sb.T/dt).astype(np.int)
+    Darr = np.zeros((3, Ns))
+    m_ind = 0
+    if (len(model.m_list) > 0):
+        m = model.m_list[m_ind]
+    else:
+        m = model.model
+    tend = 0
+    for s in range(0, Ns):
+        t = s*dt
+        if tend <= t:
+            if (t > m.sb.T):
+                m_ind += 1
+                if m_ind < len(model.m_list):
+                    m = model.m_list[m_ind]
+            ti = np.sum([m.sb.TIME <= t]) - 1
+            dat = check_for_task(m, stn, dt, j, ti)
+            tend = dat[2]
+        Darr[0, s] = dat[0]
+        Darr[1, s] = dat[1]
+        Darr[2, s] = dat[3]
+    return Darr
+
+
+def simulate_wiener7(Darr, j, dt=1/10, N=1, Ns=1,
+                     Sinit=0, S0=0, Rmax=0, plot=False):
+    np.random.seed()
+    Ninf = 0
+    S = np.ones(N)*Sinit
+    for s in range(0, Ns):
+        if Darr[2, s] < 0.5:
+            dS = np.random.normal(loc=Darr[0, s], scale=Darr[1, s], size=N)
+            S = S + dS
+        else:
+            S = np.ones(N)*S0
+        Ninf += sum(S >= Rmax)
+        S = S[S < Rmax]
+        N = S.size
+    return Ninf
+
+
+def simulate_wiener6(Darr, j, dt=1/10, N=1, Ns=1,
+                     Sinit=0, S0=0, Rmax=0, plot=False):
+    np.random.seed()
+    Ninf = 0
+    for n in range(0, N):
+        S = Sinit
+        for s in range(0, Ns):
+            if Darr[2, s] < 0.5:
+                dS = np.random.normal(loc=Darr[0, s], scale=Darr[1, s])
+                S = S + dS
+            else:
+                S = S0
+            if S >= Rmax:
+                Ninf += 1
+                break
+    return Ninf
+
+
+def simulate_wiener5(Darr, j, dt=1/10, N=1, Ns=1,
+                     Sinit=0, S0=0, Rmax=0, plot=False):
+    np.random.seed()
+    S = np.zeros((N, Ns))
+    Slast = Sinit
+    Ninf = 0
+    for n in range(0, N):
+        Slast = Sinit
+        for s in range(0, Ns):
+            if Darr[2, s] < 0.5:
+                dS = np.random.normal(loc=Darr[0, s], scale=Darr[1, s])
+                if s > 0:
+                    Slast = S[n, s - 1]
+                S[n, s] = Slast + dS
+            else:
+                S[n, s] = S0
+        if np.sum([S[n, :] >= Rmax]) > 0:
+            Ninf += 1
+    return Ninf
+
+
 def simulate_wiener4(model, j, dt=1/10, N=1, Sinit=0, S0=0, plot=False):
     stn = model.stn
     np.random.seed()
@@ -73,6 +155,7 @@ def simulate_wiener4(model, j, dt=1/10, N=1, Sinit=0, S0=0, plot=False):
         plt.plot(TIME, [stn.Rmax[j] for t in TIME])
         plt.show()
     return Ninf
+
 
 def simulate_wiener3(model, j, dt=1/10, N=1, Sinit=0, S0=0, plot=False):
     stn = model.stn
@@ -241,12 +324,32 @@ def simulate_wiener(model, j, dt=1/10, N=1, Sinit=0, S0=0):
     return Ninfeasible
 
 
-def simulate_deg(N=1, *args, **kwargs):
+def simulate_deg_old(N=1, *args, **kwargs):
     Ncpus = 7
     Nlist = np.ones((1, Ncpus))*np.floor(N/Ncpus)
     Nlist[0, 0] += N % Ncpus
     st = time.time()
     inflist = Parallel(n_jobs=Ncpus)(delayed(simulate_wiener4)(N=int(Ni),
+                                                               *args,
+                                                               **kwargs)
+                                     for Ni in Nlist[0, :])
+    print("Time taken:"+str(time.time()-st))
+    Ninf = np.sum(inflist)
+    return Ninf/N*100
+
+
+def simulate_deg(N, model, j, dt=1/10, *args, **kwargs):
+    Ncpus = 7
+    Nlist = np.ones((1, Ncpus))*np.floor(N/Ncpus)
+    Nlist[0, 0] += N % Ncpus
+    Ns = np.floor(model.sb.T/dt).astype(np.int)
+    st = time.time()
+    Darr = get_profile(model, j, dt=dt, **kwargs)
+    Rmax = model.stn.Rmax[j]
+    inflist = Parallel(n_jobs=Ncpus)(delayed(simulate_wiener7)(Darr, j,
+                                                               N=int(Ni),
+                                                               Ns=Ns,
+                                                               Rmax=Rmax,
                                                                *args,
                                                                **kwargs)
                                      for Ni in Nlist[0, :])

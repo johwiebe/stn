@@ -78,6 +78,7 @@ class stnModel(object):
             # Subtract demand from last scheduling period
             if (s, self.sb.TIME[0]) in self.Demand:
                 rhs -= self.Demand[s, self.sb.TIME[0]]
+                rhs += m.Dslack
             m.cons.add(m.sb.Sfin[s] == rhs)
             m.cons.add(0 <= m.sb.Sfin[s] <= stn.C[s])
             # Calculate amounts transfered into planning period
@@ -146,7 +147,8 @@ class stnModel(object):
         m.cons.add(m.CostMaintenance == self.calc_cost_maintenance_terminal())
 
         m.Obj = pyomo.Objective(expr=m.CostStorage
-                                + m.CostMaintenance, sense=pyomo.minimize)
+                                + m.CostMaintenance + m.Dslack*100,
+                                sense=pyomo.minimize)
 
     def add_objective_biondi(self):
         """Add objective function to model."""
@@ -221,6 +223,7 @@ class stnModel(object):
         m.Btransfer = pyomo.Var(stn.tasks, stn.units, stn.opmodes,
                                 domain=pyomo.NonNegativeReals)
         m.tautransfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeReals)
+        m.Dslack = pyomo.Var(domain=pyomo.NonNegativeReals)
 
         # scheduling and planning block
         Ts = T_list[0]
@@ -248,8 +251,10 @@ class stnModel(object):
             raise KeyError("KeyError: unknown objective %s" % objective)
 
     def solve(self, T_list, solver='cplex', prefix='', periods=1,
-              rdir='results', solverparams=None, **kwargs):
+              rdir='results', solverparams=None,
+              save=False, trace=False, gantt=True, **kwargs):
         self.solver = pyomo.SolverFactory(solver)
+        self.solver.set_results_stream(None)
         # self.solver.options['timelimit'] = 600
         if solverparams is not None:
             for key, value in solverparams.items():
@@ -265,20 +270,23 @@ class stnModel(object):
             self.build(T_list, period=period, **kwargs)
             logfile = rdir + "/" + prefix + "STN.log"
             results = self.solver.solve(self.model,
-                                        tee=True,
+                                        # tee=True,
                                         logfile=logfile)
             results.write()
             if ((results.solver.status == SolverStatus.ok) and
                 (results.solver.termination_condition ==
                  TerminationCondition.optimal)):
-                with open(rdir+"/"+prefix+'output.txt', 'w') as f:
-                    f.write("STN Output:")
-                    self.model.display(ostream=f)
-                with open(rdir+"/"+prefix+'STN.pyomo', 'wb') as dill_file:
-                    dill.dump(self.model, dill_file)
-                self.gantt(prefix=prefix, rdir=rdir)
-                self.trace(prefix=prefix, rdir=rdir)
-                self.trace_planning(prefix=prefix, rdir=rdir)
+                if save:
+                    with open(rdir+"/"+prefix+'output.txt', 'w') as f:
+                        f.write("STN Output:")
+                        self.model.display(ostream=f)
+                    with open(rdir+"/"+prefix+'STN.pyomo', 'wb') as dill_file:
+                        dill.dump(self.model, dill_file)
+                if gantt:
+                    self.gantt(prefix=prefix, rdir=rdir)
+                if trace:
+                    self.trace(prefix=prefix, rdir=rdir)
+                    self.trace_planning(prefix=prefix, rdir=rdir)
                 if periods > 1:
                     self.transfer_next_period(**kwargs)
                     self.m_list.append(self.model)

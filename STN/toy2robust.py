@@ -18,6 +18,7 @@ Operating modes:
 """
 
 import sys
+import time
 import scipy.stats as sct
 import numpy as np
 sys.path.append('../STN/modules')
@@ -29,10 +30,11 @@ import deg # noqa
 Q = [0.5, 0.48, 0.46, 0.44, 0.42, 0.4, 0.38, 0.36, 0.34, 0.32, 0.3, 0.25, 0.2,
      0.15, 0.1, 0.05, 0.01]
 mlist = []
-Nsim = 10
+Nsim = 1
 Pheater = np.ones((len(Q), Nsim))
 Preactor = np.ones((len(Q), Nsim))
 for n, q in enumerate(Q):
+    t = time.time()
     periods = 8
     soliter = 0
     model = stnModelRobust()
@@ -95,10 +97,6 @@ for n, q in enumerate(Q):
         for i in range(0, len(TIMEp)):
             model.demand('P1', TIMEp[i], demand_1[i])
             model.demand('P2', TIMEp[i], demand_2[i])
-        # build and solve model
-        # model.build(TIMEs, TIMEp, objective="terminal", decisionrule="integer")
-        # model.build([Ts, dTs, Tp, dTp], objective="terminal",
-        #          decisionrule="continuous")
         eps = 1 - sct.norm.ppf(q=q, loc=1, scale=0.27)
         model.uncertainty(eps)
         model.solve([Ts, dTs, Tp, dTp],
@@ -110,7 +108,7 @@ for n, q in enumerate(Q):
                     tindexed=True,
                     rdir="/home/jw3617/STN/results")
         soliter += 1
-        if soliter > 10:
+        if soliter > 3:
             raise
 
     # import ipdb; ipdb.set_trace()  # noqa
@@ -118,14 +116,16 @@ for n, q in enumerate(Q):
     print("q = "+str(q))
     print("Heater:")
     for j in range(0, Nsim):
-        Pheater[n, j] = deg.simulate_deg(10000, model, "Heater", Sinit=43)
+        Pheater[n, j] = deg.simulate_deg(20000, model, "Heater", Sinit=43)
         print(str(Pheater[n, j]))
     print("Reactor:")
     for j in range(0, Nsim):
-        Preactor[n, j] = deg.simulate_deg(10000, model, "Reactor",
+        Preactor[n, j] = deg.simulate_deg(20000, model, "Reactor",
                                           Sinit=72)
         print(str(Preactor[n, j]))
     mlist.append(model)
+    print("Time taken: "+str(time.time() - t))
+    import ipdb; ipdb.set_trace()  # noqa
 import ipdb; ipdb.set_trace()  # noqa
 print(Pheater)
 print(Preactor)
