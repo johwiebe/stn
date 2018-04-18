@@ -21,23 +21,44 @@ import sys
 import time
 import scipy.stats as sct
 import numpy as np
+import pandas as pd
 sys.path.append('../STN/modules')
 
 from stn import stnModelRobust # noqa
 import deg # noqa
 
 # create instance
-Q = [0.5, 0.48, 0.46, 0.44, 0.42, 0.4, 0.38, 0.36, 0.34, 0.32, 0.3, 0.25, 0.2,
-     0.15, 0.1, 0.05, 0.01]
-mlist = []
+rdir = "/home/jw3617/STN/results"
+Q = np.arange(0.01, 0.51, 0.01)
+# Q = [0.23920924126]
+cols = ["ID", "alpha", "epsilon", "Pheater", "Preactor", "CostStorage",
+        "CostMaintenance", "Cost", "Cost0", "Dslack", "timeTotal",
+        "infeasible", "demand1", "demand2"]
+df = pd.DataFrame(columns=cols)
+rid = -1
+try:
+    df2 = pd.read_pickle(rdir+"/results.pkl")
+    rid = max(df2["ID"])
+    df = df.append(df2)
+except IOError:
+    pass
+dcols = ["id", "period", "time", "unit", "task", "mode", "P1", "P2"]
+dfp = pd.DataFrame(columns=dcols)
+try:
+    dfp2 = pd.read_pickle(rdir+"/profile.pkl")
+except IOError:
+    dfp2 = dfp
 Nsim = 1
 Pheater = np.ones((len(Q), Nsim))
 Preactor = np.ones((len(Q), Nsim))
 for n, q in enumerate(Q):
+    rid += 1
     t = time.time()
     periods = 8
     soliter = 0
     model = stnModelRobust()
+    demand_1 = np.random.uniform(50, 200, 8)
+    demand_2 = np.random.uniform(50, 200, 8)
     while not (len(model.m_list) == periods):
         model = stnModelRobust()
         stn = model.stn
@@ -91,12 +112,10 @@ for n, q in enumerate(Q):
         # demand_1 = [150, 88, 125, 67, 166]
         demand_1 = [150, 88, 125, 167, 166, 125, 302, 94, 300, 300, 300, 300]
         demand_2 = [50, 188, 131, 27, 141, 155, 122, 104, 300, 300, 300, 300]
-        # model.demand('P1', Ts-dTs, demand_1[0])
-        # model.demand('P2', Ts-dTs, demand_2[0])
 
         for i in range(0, len(TIMEp)):
-            model.demand('P1', TIMEp[i], demand_1[i])
-            model.demand('P2', TIMEp[i], demand_2[i])
+            model.demand('P1', TIMEp[i], 150)  # demand_1[i])
+            model.demand('P2', TIMEp[i], 0)  # demand_2[i])
         eps = 1 - sct.norm.ppf(q=q, loc=1, scale=0.27)
         model.uncertainty(eps)
         model.solve([Ts, dTs, Tp, dTp],
@@ -104,28 +123,44 @@ for n, q in enumerate(Q):
                     objective="terminal",
                     decisionrule="continuous",
                     periods=periods,
-                    prefix="toy2R"+str(q),
-                    tindexed=True,
-                    rdir="/home/jw3617/STN/results")
+                    prefix="toy2R{0:d}".format(rid),
+                    tindexed=False,
+                    save=False,
+                    trace=False,
+                    rdir=rdir)
         soliter += 1
-        if soliter > 3:
-            raise
-
-    # import ipdb; ipdb.set_trace()  # noqa
-    # S = deg.simulate_wiener(model, "Heater", Sinit=43, N=300)
-    print("q = "+str(q))
-    print("Heater:")
-    for j in range(0, Nsim):
-        Pheater[n, j] = deg.simulate_deg(20000, model, "Heater", Sinit=43)
-        print(str(Pheater[n, j]))
-    print("Reactor:")
-    for j in range(0, Nsim):
-        Preactor[n, j] = deg.simulate_deg(20000, model, "Reactor",
-                                          Sinit=72)
-        print(str(Preactor[n, j]))
-    mlist.append(model)
-    print("Time taken: "+str(time.time() - t))
-    import ipdb; ipdb.set_trace()  # noqa
-import ipdb; ipdb.set_trace()  # noqa
-print(Pheater)
-print(Preactor)
+        if soliter > 1:
+            break
+    profile = model.get_unit_profile("Reactor", full=False)
+    profile["id"] = rid
+    dfp = dfp.append(profile)
+    print("MCS Heater")
+    pheater = 0  # deg.simulate_deg(20000, model, "Heater", Sinit=43)
+    print("MCS Reactor")
+    preactor = deg.simulate_deg(100000, model, "Reactor",
+                                Sinit=72, dt=1)
+    infeasible = soliter > 1
+    cost_storage = 0
+    cost_maint = 0
+    cost = 0
+    dslack = 0
+    for period, m in enumerate(model.m_list):
+        cost_storage += m.sb.CostStorage()
+        cost_maint += m.sb.CostMaintenance()
+        dslack += m.TotSlack()
+    cost += cost_storage + cost_maint + m.pb.CostMaintenanceFinal()
+    cost0 = model.m_list[0].Obj()
+    ttot = time.time() - t
+    demand1 = sum(demand_1)
+    demand2 = sum(demand_2)
+    line = pd.DataFrame([[rid, q, eps, pheater, preactor, cost_storage,
+                         cost_maint, cost, cost0, dslack,
+                         ttot, infeasible, demand1, demand2]], columns=cols)
+    df = df.append(line, ignore_index=True)
+    print(df)
+# df = df.append(df2)
+df.to_pickle(rdir+"/results.pkl")
+df.to_csv(rdir+"/results.csv")
+dfp = dfp.append(dfp2)
+dfp.to_pickle(rdir+"/profile.pkl")
+dfp.to_csv(rdir+"/profile.csv")

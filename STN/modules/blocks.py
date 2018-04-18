@@ -11,35 +11,88 @@ The implementation of the STN is based on the implementation by Jeffrey Kantor
 """
 
 import pyomo.environ as pyomo
+from pyomo.opt import SolverStatus, TerminationCondition
 import numpy as np
+import pandas as pd
+import dill
+import sys
+import matplotlib.pyplot as plt
 
 
 class stnBlock(object):
 
-    def __init__(self, b, stn, T_list, Demand, **kwargs):
-        self.b = b
+    def __init__(self, stn, T_list, Demand={}, **kwargs):
         self.stn = stn
         self.T = T_list[1]
         self.dT = T_list[2]
         TIME = range(T_list[0], self.T, self.dT)
         self.TIME = np.array(TIME)
-        # self.dT = TIME[1] - TIME[0]
-        # self.T = max(TIME) + self.dT
         self.Demand = Demand
 
-        self.define_block(**kwargs)
+    def demand(self, state, time, Demand):
+        self.Demand[state, time] = Demand
 
-    def define_block(self, **kwargs):
-        b = self.b
+    def build(self, **kwargs):
+        """
+        Initializes and builds model. Only call this if block is
+        used individually.
+        """
+        self.model = pyomo.ConcreteModel()
+        m = self.model
+        self.define_block(m, **kwargs)
+        # Add objective to model
+        m.Obj = pyomo.Objective(expr=m.Cost,
+                                sense=pyomo.minimize)
+
+    def solve(self, solver='cplex', prefix='',
+              rdir='results', solverparams=None,
+              save=False, trace=False, gantt=True, **kwargs):
+        self.solver = pyomo.SolverFactory(solver)
+        if solverparams is not None:
+            for key, value in solverparams.items():
+                self.solver.options[key] = value
+
+        logfile = rdir + "/" + prefix + "STN.log"
+        results = self.solver.solve(self.model,
+                                    tee=True,
+                                    # keepfiles=True,
+                                    # symbolic_solver_labels=True,
+                                    logfile=logfile)
+        results.write()
+        if ((results.solver.status == SolverStatus.ok) and
+            (results.solver.termination_condition ==
+             TerminationCondition.optimal or
+             results.solver.termination_condition ==
+             TerminationCondition.maxTimeLimit)):
+            if save:
+                with open(rdir+"/"+prefix+'output.txt', 'w') as f:
+                    f.write("STN Output:")
+                    self.model.display(ostream=f)
+                with open(rdir+"/"+prefix+'STN.pyomo', 'wb') as dill_file:
+                    dill.dump(self.model, dill_file)
+            if gantt:
+                self.gantt(prefix=prefix, rdir=rdir)
+            if trace:
+                self.trace(prefix=prefix, rdir=rdir)
+        if (results.solver.termination_condition ==
+                TerminationCondition.infeasible):
+            self.inf = True
+        else:
+            self.inf = False
+
+    def define_block(self, b, **kwargs):
+        self.b = b
         b.TIME = self.TIME
         b.T = self.T
         b.dT = self.dT
         b.cons = pyomo.ConstraintList()
 
+        # add variables, constraints, and objective to model
         self.add_vars(**kwargs)
         self.add_unit_constraints()
         self.add_state_constraints()
         self.add_deg_constraints(**kwargs)
+        self.add_objective(**kwargs)
 
     def add_vars(self, **kwargs):
         raise NotImplementedError
@@ -53,25 +106,34 @@ class stnBlock(object):
     def add_deg_constraints(self, **kwargs):
         raise NotImplementedError
 
+    def add_objective(self, **kwargs):
+        raise NotImplementedError
+
+    def trace(self, prefix='', rdir=None):
+        raise NotImplementedError
+
+    def gantt(self, prefix='', rdir=None):
+        raise NotImplementedError
+
 
 class blockScheduling(stnBlock):
 
-    def __init__(self, b, stn, TIME, Demand, **kwargs):
-        super().__init__(b, stn, TIME, Demand, **kwargs)
+    def __init__(self, stn, TIME, Demand={}, **kwargs):
+        super().__init__(stn, TIME, Demand, **kwargs)
 
     def add_unit_constraints(self):
         """Add unit constraints to block"""
         b = self.b
         stn = self.stn
-        # import ipdb; ipdb.set_trace()  # noqa
         for j in stn.units:
             for t in self.TIME:
+                rhs = 1
                 lhs = 0
                 # check if task is still running on unit j
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         if t - self.TIME[0] < stn.pinit[i, j, k]:
-                            lhs += 1
+                            rhs = 0
                         for tprime in self.TIME[(self.TIME <= t)
                                                 & (self.TIME
                                                    >= t
@@ -80,7 +142,7 @@ class blockScheduling(stnBlock):
                             lhs += b.W[i, j, k, tprime]
                 # check if maintenance is going on on unit j
                 if t - self.TIME[0] < stn.tauinit[j]:
-                    lhs += 1
+                    rhs = 0
                 for tprime in self.TIME[(self.TIME <= t)
                                         & (self.TIME
                                            >= t
@@ -88,7 +150,7 @@ class blockScheduling(stnBlock):
                                            + self.dT)]:
                     lhs += b.M[j, tprime]
                 # a unit can only be allocated to one task
-                b.cons.add(lhs <= 1)
+                b.cons.add(lhs <= rhs)
 
                 # capacity constraints (see Konkili, Sec. 3.1.2)
                 for i in stn.I[j]:
@@ -106,7 +168,7 @@ class blockScheduling(stnBlock):
             rhs = stn.init[s]
             for t in self.TIME:
                 # state capacity constraint
-                b.cons.add(b.S[s, t] <= stn.C[s])
+                b.cons.add(b.S[s, t] - b.Sslack[s, t] <= stn.C[s])
                 # state mass balanace
                 for i in stn.T_[s]:
                     for j in stn.K[i]:
@@ -139,6 +201,7 @@ class blockScheduling(stnBlock):
             rhs = stn.Rinit[j]
             for t in self.TIME:
                 # constraints on F[j,t] and R[j,t]
+                # TODO: these are obsolete?
                 b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
                 b.cons.add(b.F[j, t] <= stn.Rmax[j] - rhs)
                 b.cons.add(b.F[j, t] >= stn.Rmax[j]*b.M[j, t] - rhs)
@@ -149,6 +212,57 @@ class blockScheduling(stnBlock):
                         rhs -= stn.D[i, j, k]*b.W[i, j, k, t]
                 rhs += b.F[j, t]
                 b.cons.add(b.R[j, t] == rhs)
+
+    def add_objective(self, **kwargs):
+        """Add objective function to model."""
+        b = self.b
+        stn = self.stn
+
+        costStorage = 0
+        for s in stn.states:
+            costStorage += stn.scost[s]*(b.Sfin[s])
+        b.cons.add(b.CostStorage == costStorage)
+
+        costMaintenance = 0
+        for j in stn.units:
+            for t in self.TIME:
+                costMaintenance += ((stn.a[j] - stn.b[j])
+                                    * b.M[j, t])
+        b.cons.add(b.CostMaintenance == costMaintenance)
+        b.cons.add(b.Cost == b.CostStorage + b.CostMaintenance +
+                   b.CostMaintenanceFinal)
+
+    def add_demand_constraint(self):
+        stn = self.stn
+        b = self.b
+        for s in stn.states:
+            rhs = b.S[s, self.T - self.dT]
+            for i in stn.T_[s]:
+                for j in stn.K[i]:
+                    for k in stn.O[j]:
+                        rhs += (stn.rho_[(i, s)]
+                                * b.B[i, j, k,
+                                      self.T
+                                      - stn.p[i, j, k]])
+            # Subtract demand from last scheduling period
+            if s in self.Demand:
+                rhs -= self.Demand[s]
+            b.cons.add(b.Sfin[s] == rhs)
+            b.cons.add(0 <= b.Sfin[s] <= stn.C[s])
+
+    def build(self, **kwargs):
+        super().build(**kwargs)
+        stn = self.stn
+        b = self.b
+        self.calc_cost_maintenance_terminal()
+        self.add_demand_constraint()
+        for s in stn.states:
+            for t in self.TIME:
+                b.cons.add(b.Sslack[s, t] == 0)
+
+    def define_block(self, b, **kwargs):
+        # Define affine decision rule
+        super().define_block(b, **kwargs)
 
     def add_vars(self, **kwargs):
         b = self.b
@@ -181,13 +295,243 @@ class blockScheduling(stnBlock):
         # Variables for continuity between scheduling and planning horizon
         b.Sfin = pyomo.Var(stn.states, domain=pyomo.NonNegativeReals)
 
+        b.CostStorage = pyomo.Var(domain=pyomo.NonNegativeReals)
+        b.CostMaintenance = pyomo.Var(domain=pyomo.NonNegativeReals)
+        b.CostMaintenanceFinal = pyomo.Var(domain=pyomo.NonNegativeReals)
+        b.Cost = pyomo.Var(domain=pyomo.NonNegativeReals)
+        b.Sslack = pyomo.Var(stn.states, self.TIME,
+                             domain=pyomo.NonNegativeReals)
+
+    def calc_cost_maintenance_terminal(self):
+        stn = self.stn
+        b = self.b
+        costFinal = 0
+        for j in stn.units:
+            costFinal += ((1 - b.R[j, self.T - self.dT]
+                           / stn.Rmax[j])
+                          * (stn.a[j] - stn.b[j]))
+        b.cons.add(b.CostMaintenanceFinal == costFinal)
+
+    def check_for_task(self, j, t):
+        b = self.b
+        stn = self.stn
+        tend = t
+        for i in stn.I[j]:
+            for k in stn.O[j]:
+                W = b.W[i, j, k, t]()
+                if W > 0.5:
+                    tend = t + stn.p[i, j, k]
+                    return [i, k, tend]
+        i = "None"
+        k = "None"
+        M = b.M[j, t]()
+        if M > 0.5:
+            tend = t + stn.tau[j]
+            i = "M"
+            k = "M"
+        return [i, k, tend]
+
+    def get_unit_profile(self, j, full=True):
+        cols = ["time", "unit", "task", "mode"]
+        prods = set(self.Demand.keys())
+        demand = []
+        for p in prods:
+            cols.append(p)
+            demand.append(0)
+        profile = pd.DataFrame(columns=cols)
+        tend = 0
+        for t in self.TIME:
+            tend_old = tend
+            if t >= tend:
+                [i, k, tend] = self.check_for_task(j, t)
+            line = [t, j, i, k]
+            for n, p in enumerate(prods):
+                if (p) in self.Demand:
+                    demand[n] = self.Demand[p]
+            line += demand
+            if full or t >= tend_old:
+                profile = profile.append(pd.Series(line,
+                                                   index=cols),
+                                         ignore_index=True)
+        return profile
+
+    def gantt(self, prefix='', rdir=None):
+        assert rdir is not None
+        b = self.b
+        stn = self.stn
+
+        gap = self.T/400
+        idx = 1
+        lbls = []
+        ticks = []
+
+        # create a list of units sorted by time of first assignment
+        jstart = {j: self.T+1 for j in stn.units}
+        for j in stn.units:
+            for i in stn.I[j]:
+                for k in stn.O[j]:
+                    for t in self.TIME:
+                        # print(self.model.W[i,j,k,t]())
+                        if b.W[i, j, k, t]() > 0:
+                            jstart[j] = min(jstart[j], t)
+        jsorted = [j for (j, t) in sorted(jstart.items(),  key=lambda x: x[1])]
+        jsorted = sorted(stn.units)
+
+        # number of horizontal bars to draw
+        nbars = -1
+        for j in jsorted:
+            for i in sorted(stn.I[j]):
+                nbars += 1
+            nbars += 0.5
+        plt.figure(figsize=(12, (nbars+1)/2))
+
+        for j in jsorted:
+            idx -= 0.5
+            idx0 = idx
+            for t in self.TIME:
+                idx = idx0
+                for i in sorted(stn.I[j]):
+                    idx -= 1
+                    if t == self.TIME[0]:
+                        ticks.append(idx)
+                        plt.plot([self.TIME[0], self.T],
+                                 [idx, idx], lw=24,
+                                 alpha=.3, color='y')
+                        lbls.append("{0:s} -> {1:s}".format(j, i))
+                    for k in stn.O[j]:
+                        if b.W[i, j, k, t]() > 0.5:
+                            col = {'Slow': 'green', 'Normal': 'yellow',
+                                   'Fast': 'red'}  # TODO: shouldn't be explicit
+                            plt.plot([t, t+stn.p[i, j, k]],
+                                     [idx, idx], 'k',  lw=24,
+                                     alpha=0.5, solid_capstyle='butt')
+                            plt.plot([t+gap, t+stn.p[i, j, k]-gap],
+                                     [idx, idx], color=col[k], lw=20,
+                                     solid_capstyle='butt')
+                            txt = "{0:.2f}".format(b.B[i, j, k, t]())
+                            plt.text(t+stn.p[i, j, k]/2, idx,  txt,
+                                     weight='bold', ha='center', va='center')
+                    if b.M[j, t]() > 0.5:
+                        plt.plot([t, t+stn.tau[j]],
+                                 [idx, idx], 'k',  lw=24,
+                                 alpha=0.5, solid_capstyle='butt')
+                        plt.plot([t+gap, t+stn.tau[j]-gap],
+                                 [idx, idx], color="grey", lw=20,
+                                 solid_capstyle='butt')
+                        plt.text(t+stn.tau[j]/2, idx, "Maintenance",
+                                 weight='bold', ha='center', va='center')
+
+        plt.xlim(self.TIME[0], self.T)
+        plt.ylim(-nbars-0.5, 0)
+        plt.gca().set_yticks(ticks)
+        plt.gca().set_yticklabels(lbls)
+        plt.savefig(rdir+"/"+prefix+'gantt_scheduling.png')
+
+        plt.close("all")
+
+    def trace(self, prefix='', rdir=None):
+        assert rdir is not None
+        # abbreviations
+        b = self.b
+        stn = self.stn
+
+        oldstdout = sys.stdout
+        sys.stdout = open(rdir+"/"+prefix+'trace_scheduling.txt', 'w')
+        print("\nStarting Conditions")
+        print("\n    Initial State Inventories are:")
+        for s in stn.states:
+            print("        {0:10s}  {1:6.1f} kg".format(s, stn.init[s]))
+
+        # for tracking unit assignments
+        # t2go[j]['assignment'] contains the task to which unit j is currently
+        # assigned
+        # t2go[j]['t'] is the time to go on equipment j
+        time2go = {j: {'assignment': 'None', 't': 0} for j in stn.units}
+
+        for t in b.TIME:
+            print("\nTime =", t, "hr")
+
+            # create list of instructions
+            strList = []
+
+            # first unload units
+            for j in stn.units:
+                time2go[j]['t'] -= b.dT
+                fmt = 'Transfer {0:.2f} kg from {1:s} to {2:s}'
+                for i in stn.I[j]:
+                    for s in stn.S_[i]:
+                        for k in stn.O[j]:
+                            ts = t-stn.p[i, j, k]
+                            if ts >= b.TIME[0]:
+                                tend = max(b.TIME[b.TIME <= ts])
+                                amt = (stn.rho_[(i, s)]
+                                       * b.B[i, j, k, tend]())
+                                if amt > 0:
+                                    strList.append(fmt.format(amt, j, s))
+
+            for j in stn.units:
+                # release units from tasks
+                fmt = 'Release {0:s} from {1:s}'
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        if t-stn.p[i, j, k] >= b.TIME[0]:
+                            tend = max(b.TIME[b.TIME
+                                              <= t
+                                              - stn.p[i, j, k]])
+                            if b.W[i, j, k, tend]() > 0:
+                                strList.append(fmt.format(j, i))
+                                time2go[j]['assignment'] = 'None'
+                                time2go[j]['t'] = 0
+
+                # assign units to tasks
+                fmt = ('Assign {0:s} to {1:s} for {2:.2f} kg batch for {3:.1f}'
+                       'hours (Mode: {4:s})')
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        amt = b.B[i, j, k, t]()
+                        if b.W[i, j, k, t]() > 0.5:
+                            strList.append(fmt.format(j, i, amt,
+                                                      stn.p[i, j, k], k))
+                            time2go[j]['assignment'] = i
+                            time2go[j]['t'] = stn.p[i, j, k]
+
+                # transfer from states to tasks/units
+                fmt = 'Transfer {0:.2f} from {1:s} to {2:s}'
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        for s in stn.S[i]:
+                            amt = stn.rho[(i, s)] * b.B[i, j, k, t]()
+                            if amt > 0:
+                                strList.append(fmt.format(amt, s, j))
+
+                # Check if maintenance is done on unit
+                fmt = 'Doing maintenance on {0:s}'
+                if b.M[j, t]() > 0.5:
+                    strList.append(fmt.format(j))
+
+            if len(strList) > 0:
+                print()
+                idx = 0
+                for str in strList:
+                    idx += 1
+                    print('   {0:2d}. {1:s}'.format(idx, str))
+
+            print("\n    State Inventories are now:")
+            for s in stn.states:
+                print("        {0:10s}  {1:6.1f} kg".format(s,
+                                                            b.S[s, t]()))
+
+        sys.stdout = oldstdout
+
 
 class blockSchedulingRobust(blockScheduling):
     """Implements robust constraints for the scheduling horizon"""
 
-    def __init__(self, b, stn, TIME, Demand, **kwargs):
+    def __init__(self, stn, TIME, Demand={}, **kwargs):
+        super().__init__(stn, TIME, Demand, **kwargs)
 
-        super().__init__(b, stn, TIME, Demand, **kwargs)
+    def build(self, decisionrule="continuous", tindexed=False, **kwargs):
+        super().build(decisionrule=decisionrule, tindexed=tindexed, **kwargs)
 
     def calc_nominal_R(self, tindexed=None):
         assert tindexed is not None
@@ -198,7 +542,7 @@ class blockSchedulingRobust(blockScheduling):
             for t in self.TIME:
                 rhs = b.R0[j, t]
                 for i in stn.I[j]:
-                    for k in stn.O[j]:  # TODO: Fix this for not time indexed
+                    for k in stn.O[j]:
                         if tindexed:
                             for tprime in self.TIME[self.TIME <= t]:
                                 rhs += stn.D[i, j, k]*b.Rc[j, t, i, k, tprime]
@@ -246,6 +590,17 @@ class blockSchedulingRobust(blockScheduling):
                          stn.opmodes, self.TIME,
                          domain=pyomo.NonNegativeReals)
 
+    def calc_cost_maintenance_terminal(self):
+        b = self.b
+        stn = self.stn
+
+        costFinal = 0
+        for j in stn.units:
+            costFinal += ((b.R[j, self.T - self.dT]
+                           / stn.Rmax[j])
+                          * (stn.a[j] - stn.b[j]))
+        b.cons.add(b.CostMaintenanceFinal == costFinal)
+
     def add_vars_not_tindexed(self, domain):
         b = self.b
         stn = self.stn
@@ -285,9 +640,9 @@ class blockSchedulingRobust(blockScheduling):
                            domain=pyomo.NonNegativeReals)
         super().add_vars()
 
-    def define_block(self, decisionrule=None, **kwargs):
+    def define_block(self, b, decisionrule=None, **kwargs):
         # Define affine decision rule
-        super().define_block(decisionrule=decisionrule, **kwargs)
+        super().define_block(b, decisionrule=decisionrule, **kwargs)
         self.calc_nominal_R(**kwargs)
         self.calc_max_R(**kwargs)
         assert decisionrule is not None
@@ -578,8 +933,8 @@ class blockSchedulingRobust(blockScheduling):
 
 class blockPlanning(stnBlock):
 
-    def __init__(self, b, stn, TIME, Demand, **kwargs):
-        super().__init__(b, stn, TIME, Demand, **kwargs)
+    def __init__(self, stn, TIME, Demand={}, **kwargs):
+        super().__init__(stn, TIME, Demand, **kwargs)
 
     def add_unit_constraints(self):
         """Add unit constraints to block."""
@@ -618,6 +973,7 @@ class blockPlanning(stnBlock):
         """Add state constraints to block."""
         b = self.b
         stn = self.stn
+        totslack = 0
         for s in stn.states:
             rhs = b.Stransfer[s]
             for t in self.TIME:
@@ -632,7 +988,10 @@ class blockPlanning(stnBlock):
                         rhs -= stn.rho[(i, s)]*b.A[i, j, t]
                 if ((s, t) in self.Demand):
                     rhs -= self.Demand[s, t]
+                    rhs += b.Dslack[s, t]
+                    totslack += b.Dslack[s, t]
                 b.cons.add(b.S[s, t] == rhs)
+                b.cons.add(b.TotSlack == totslack)
                 rhs = b.S[s, t]
 
     def add_deg_constraints(self, **kwargs):
@@ -651,6 +1010,74 @@ class blockPlanning(stnBlock):
                 # constraints on R and F
                 b.cons.add(0 <= b.R[j, t] <= stn.Rmax[j])
                 b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+
+    def build(self, **kwargs):
+        super().build(**kwargs)
+        self.set_initial_values()
+
+    def calc_cost_storage(self):
+        b = self.b
+        stn = self.stn
+
+        costTotal = 0
+        for t in self.TIME:
+            costStorage = 0
+            for s in stn.states:
+                costStorage += (stn.scost[s]
+                                * b.S[s, t])
+            b.cons.add(b.CostStorage[t] == costStorage)
+            costTotal += costStorage
+        return costTotal
+
+    def calc_cost_maintenance(self):
+        b = self.b
+        stn = self.stn
+        costTotal = 0
+        for t in self.TIME:
+            costMaintenance = 0
+            for j in stn.units:
+                costMaintenance += ((stn.a[j] - stn.b[j])
+                                    * b.M[j, t])
+            b.cons.add(b.CostMaintenance[t] == costMaintenance)
+            costTotal += costMaintenance
+        return costTotal
+
+    def calc_cost_wear(self):
+        b = self.b
+        stn = self.stn
+
+        costTotal = 0
+        for t in self.TIME:
+            costWear = 0
+            for j in stn.units:
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        costWear += stn.D[i, j, k]*b.N[i, j, k, t]
+            b.cons.add(b.CostWear[t] == costWear)
+            costTotal += costWear
+        return costTotal
+
+    def add_objective(self, objective="terminal", **kwargs):
+        """Add objective function to model."""
+        b = self.b
+        stn = self.stn
+
+        cost = self.calc_cost_storage()
+        cost += self.calc_cost_maintenance()
+        if objective == "biondi":
+            cost += self.calc_cost_wear()
+        elif objective == "terminal":
+            costFinal = 0
+            for j in stn.units:
+                costFinal += ((stn.Rmax[j]
+                               - b.R[j, self.T - self.dT])
+                              / stn.Rmax[j]
+                              * (stn.a[j] - stn.b[j]))
+            b.cons.add(b.CostMaintenanceFinal == costFinal)
+            cost += costFinal
+        else:
+            raise KeyError("KeyError: unknown objective %s" % objective)
+        b.cons.add(b.Cost == cost)
 
     def add_vars(self, **kwargs):
         b = self.b
@@ -690,12 +1117,161 @@ class blockPlanning(stnBlock):
         b.Ntransfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeIntegers)
         b.Rtransfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeReals)
 
+        b.CostStorage = pyomo.Var(self.TIME, domain=pyomo.NonNegativeReals)
+        b.CostMaintenance = pyomo.Var(self.TIME, domain=pyomo.NonNegativeReals)
+        b.CostWear = pyomo.Var(self.TIME, domain=pyomo.NonNegativeReals)
+        b.CostMaintenanceFinal = pyomo.Var(domain=pyomo.NonNegativeReals)
+        b.Cost = pyomo.Var(domain=pyomo.NonNegativeReals)
+
+        b.Dslack = pyomo.Var(stn.states, self.TIME,
+                             domain=pyomo.NonNegativeReals)
+        b.TotSlack = pyomo.Var(domain=pyomo.NonNegativeReals)
+
+    def set_initial_values(self):
+        stn = self.stn
+        b = self.b
+
+        for s in stn.states:
+            b.cons.add(b.Stransfer[s] == stn.init[s])
+
+        for j in stn.units:
+            b.cons.add(b.Ntransfer[j] == 0)
+            b.cons.add(b.Rtransfer[j] == stn.Rinit[j])
+
+    def gantt(self, prefix='', rdir=None):
+        assert rdir is not None
+        stn = self.stn
+        b = self.b
+
+        gap = self.T/400
+        idx = 1
+        lbls = []
+        ticks = []
+        # TODO: This is stupid!
+        col = {'Heating': 'green', 'Reaction_1': 'yellow',
+               'Reaction_3': 'red', 'Reaction_2': 'orange',
+               'Separation': 'blue'}
+        pat = {'Slow': 'yellow', 'Normal': 'orange', 'Fast': 'red'}
+        jsorted = sorted(stn.units)
+
+        # number of horizontal bars to draw
+        nbars = -1
+        for j in jsorted:
+            for i in sorted(stn.I[j]):
+                nbars += 1
+            nbars += 0.5
+        plt.figure(figsize=(12, (nbars+1)/2))
+
+        for j in jsorted:
+            idx -= 0.5
+            idx -= 1
+            ticks.append(idx)
+            lbls.append("{0:s}".format(j, i))
+            plt.plot([self.TIME[0], self.T],
+                     [idx, idx], lw=24, alpha=.3, color='y')
+            for t in self.TIME:
+                tau = t
+                plt.axvline(t, color="black")
+                for i in sorted(stn.I[j]):
+                    for k in stn.O[j]:
+                        if b.N[i, j, k, t]() > 0.5:
+                            tauNext = (tau
+                                       + b.N[i, j, k, t]()
+                                       * stn.p[i, j, k])
+                            plt.plot([tau, tauNext],
+                                     [idx, idx], color=pat[k],
+                                     lw=24, solid_capstyle='butt')
+                            plt.plot([tau+gap, tauNext-gap],
+                                     [idx, idx], color=col[i],
+                                     lw=20, solid_capstyle='butt')
+                            txt = "{0:d}".format(int(b.N[i, j, k, t]()))
+                            plt.text((tau+tauNext)/2,  idx,
+                                     txt,  # color=col[k],
+                                     weight='bold', ha='center', va='center')
+                            tau = tauNext
+                if b.M[j, t]() > 0.5:
+                    tauNext = tau + stn.tau[j]
+                    plt.plot([tau, tauNext],
+                             [idx, idx], 'k',  lw=24,  solid_capstyle='butt')
+                    plt.plot([tau+gap, tauNext-gap],
+                             [idx, idx], 'k', lw=20, solid_capstyle='butt')
+
+        plt.xlim(self.TIME[0], self.T)
+        plt.ylim(-nbars-0.5, 0)
+        plt.gca().set_yticks(ticks)
+        plt.gca().set_yticklabels(lbls)
+        plt.gca().set_xticks(self.TIME)
+        plt.gca().set_xticklabels(np.round(100*self.TIME/168)/100)
+        plt.savefig(rdir+"/"+prefix+'gantt_planning.png')
+
+    def trace(self, prefix='', rdir=None):
+        assert rdir is not None
+        # abbreviations
+        b = self.b
+        stn = self.stn
+
+        oldstdout = sys.stdout
+        sys.stdout = open(rdir+"/"+prefix+'trace_planning.txt', 'w')
+        print("\nStarting Conditions")
+        print("\n    Initial State Inventories are:")
+        for s in stn.states:
+            print("        {0:10s}  {1:6.1f} kg".format(s, b.Stransfer[s]()))
+
+        # for tracking unit assignments
+        # t2go[j]['assignment'] contains the task to which unit j is currently
+        # assigned
+        # t2go[j]['t'] is the time to go on equipment j
+        time2go = {j: {'assignment': 'None', 't': 0} for j in stn.units}
+
+        for t in b.TIME:
+            print("\nTime =", t, "hr")
+
+            # create list of instructions
+            strList = []
+
+            for j in stn.units:
+                # assign units to tasks
+                fmt = ('Assign {0:s} to {1:s} for {2:.0f} batches'
+                       '(Amount: {3:.1f}'
+                       'kg, Mode: {4:s})')
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        amt = b.A[i, j, t]()
+                        if b.N[i, j, k, t]() > 0.5:
+                            strList.append(fmt.format(j, i,
+                                                      b.N[i, j, k, t](),
+                                                      amt, k))
+                            time2go[j]['assignment'] = i
+                            time2go[j]['t'] = stn.p[i, j, k]
+
+            if len(strList) > 0:
+                print()
+                idx = 0
+                for str in strList:
+                    idx += 1
+                    print('   {0:2d}. {1:s}'.format(idx, str))
+
+            print("\n    State Inventories are now:")
+            for s in stn.states:
+                print("        {0:10s}  {1:6.1f} kg".format(s,
+                                                            b.S[s, t]()))
+            print("\n    Maintenance:")
+            for j in stn.units:
+                if b.M[j, t]() > 0.5:
+                    print("        {0:10s}".format(j))
+            # print('\n    Unit Assignments are now:')
+            fmt = '        {0:s}: {1:s}, {2:.2f} kg, {3:.1f} hours to go.'
+        sys.stdout = oldstdout
+
 
 class blockPlanningRobust(blockPlanning):
     """Implements robust constraints for the scheduling horizon"""
 
-    def __init__(self, b, stn, TIME, Demand, **kwargs):
-        super().__init__(b, stn, TIME, Demand, **kwargs)
+    def __init__(self, stn, TIME, Demand, **kwargs):
+        super().__init__(stn, TIME, Demand, **kwargs)
+
+    def build(self, decisionrule="continuous", tindexed=False, **kwargs):
+        super().build(decisionrule=decisionrule, tindexed=tindexed, **kwargs)
 
     def calc_nominal_R(self, tindexed=None):
         assert tindexed is not None
@@ -713,6 +1289,26 @@ class blockPlanningRobust(blockPlanning):
                         else:
                             rhs += stn.D[i, j, k]*b.Rc[j, t, i, k]
                 b.cons.add(b.R[j, t] == rhs)
+
+    def add_objective(self, objective="terminal", **kwargs):
+        """Add objective function to model."""
+        b = self.b
+        stn = self.stn
+
+        cost = self.calc_cost_storage()
+        cost += self.calc_cost_maintenance()
+        if objective == "biondi":
+            cost += self.calc_cost_wear()
+        elif objective == "terminal":
+            costFinal = 0
+            for j in stn.units:
+                costFinal += (b.R[j, self.T - self.dT]
+                              / stn.Rmax[j]
+                              * (stn.a[j] - stn.b[j]))
+            b.cons.add(b.CostMaintenanceFinal == costFinal)
+        else:
+            raise KeyError("KeyError: unknown objective %s" % objective)
+        b.cons.add(b.Cost == cost + costFinal)
 
     def add_vars(self, decisionrule=None, tindexed=None, **kwargs):
         assert decisionrule is not None
@@ -774,9 +1370,9 @@ class blockPlanningRobust(blockPlanning):
                          stn.opmodes,
                          domain=pyomo.NonNegativeReals)
 
-    def define_block(self, decisionrule=None, **kwargs):
+    def define_block(self, b, decisionrule=None, **kwargs):
         # Define affine decision rule
-        super().define_block(decisionrule=decisionrule, **kwargs)
+        super().define_block(b, decisionrule=decisionrule, **kwargs)
         self.calc_nominal_R(**kwargs)
         assert decisionrule is not None
         # if decisionrule == "integer":

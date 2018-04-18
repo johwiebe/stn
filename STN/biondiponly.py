@@ -9,11 +9,11 @@ Created on Mon Oct  9 08:37:40 2017
 import sys
 import dill
 sys.path.append('../STN/modules')
-from blocks2 import blockPlanning # noqa
+from blocks2 import blockPlanningRobust # noqa
 
 # create instance
 
-with open("biondistruct.dat", "rb") as dill_file:
+with open("biondiRstruct.dat", "rb") as dill_file:
     stn = dill.load(dill_file)
 
 
@@ -30,8 +30,8 @@ TIMEp = range(0, Tp, dTp)
 # demand_1 = [100 for i in range(0, Tp, dTp)]
 # demand_1 = [100 for i in range(0, Tp, dTp)]
 
-model = blockPlanning(stn, [0, Tp, dTp],
-                      {"Product_1": 150, "Product_2": 200})
+model = blockPlanningRobust(stn, [0, Tp, dTp],
+                            {"Product_1": 150, "Product_2": 200})
 for n, t in enumerate(TIMEp):
     model.demand('Product_1', t, demand_1[n])
     model.demand('Product_2', t, demand_2[n])
@@ -49,6 +49,7 @@ model.solve(
             rdir="/home/jw3617/STN/results",
             tindexed=False,
             save=True,
+            trace=True,
             solverparams=solverparams)
 
 import ipdb; ipdb.set_trace()  # noqa

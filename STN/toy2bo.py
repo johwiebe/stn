@@ -22,7 +22,6 @@ import time
 import scipy.stats as sct
 import numpy as np
 import pandas as pd
-from bayes_opt import BayesianOptimization
 from skopt import gp_minimize
 sys.path.append('../STN/modules')
 
@@ -125,8 +124,8 @@ def target(x):
                     periods=periods,
                     prefix="toy2R{0:.2f}".format(q),
                     tindexed=False,
-                    save=True,
-                    trace=True,
+                    save=False,
+                    trace=False,
                     rdir=rdir)
         soliter += 1
         if soliter > 1:
@@ -162,15 +161,15 @@ def target(x):
     dfp = dfp.append(dfp2)
     dfp.to_pickle(rdir+"/profile.pkl")
     dfp.to_csv(rdir+"/profile.csv")
-    eps_target = 10
+    # eps_target = 1
 
-    return abs(preactor - eps_target)/(100-eps_target)*2 - 1
+    # return np.sqrt(abs(preactor - eps_target)/(100-eps_target))*2 - 1
+    return preactor/100*5000 + (1-preactor/100)*cost
 
 
 if __name__ == "__main__":
 
     # bo = BayesianOptimization(target, {'q': (0.05, 0.5)})
     # bo.maximize(init_points=10, n_iter=30, acq='ei', xi=0.01)
-    bo = gp_minimize(target, [(0.05, 0.5)], acq_func="EI", n_calls=15,
-                     n_random_starts=5, noise=0.1)
-    import ipdb; ipdb.set_trace()  # noqa
+    bo = gp_minimize(target, [(0.05, 0.5)], acq_func="EI", n_calls=30,
+                     n_random_starts=10, noise=0.2)
