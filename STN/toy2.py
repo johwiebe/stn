@@ -20,10 +20,10 @@ Operating modes:
 import sys
 sys.path.append('../STN/modules')
 
-from stn import stnModel # noqa
+from stn import stnModelRobust # noqa
 
 # create instance
-model = stnModel()
+model = stnModelRobust()
 stn = model.stn
 
 # states
@@ -50,19 +50,19 @@ stn.tsArc('Reaction_2',    'P2',      rho=1.0)
 stn.unit('Heater', 'Heating', Bmin=40, Bmax=100, tm=8, rmax=80,
          rinit=43, a=600, b=300)
 stn.unit('Reactor', 'Reaction_1', Bmin=30, Bmax=140, tm=11, rmax=120,
-         rinit=50, a=600, b=300)
+         rinit=72, a=600, b=300)
 stn.unit('Reactor', 'Reaction_2', Bmin=30, Bmax=140, tm=11, rmax=120,
-         rinit=50, a=600, b=300)
+         rinit=72, a=600, b=300)
 
 # operating mode and degradation data
 stn.opmode('Slow')
 stn.opmode('Normal')
-stn.ijkdata('Heating', 'Heater', 'Slow', 9, 5.5)
-stn.ijkdata('Heating', 'Heater', 'Normal', 6, 11)
-stn.ijkdata('Reaction_1', 'Reactor', 'Slow', 6, 7)
-stn.ijkdata('Reaction_1', 'Reactor', 'Normal', 4, 9)
-stn.ijkdata('Reaction_2', 'Reactor', 'Slow', 10, 5)
-stn.ijkdata('Reaction_2', 'Reactor', 'Normal', 6, 13)
+stn.ijkdata('Heating', 'Heater', 'Slow', 9, 5.5, 0.27*5.5)
+stn.ijkdata('Heating', 'Heater', 'Normal', 6, 11, 0.27*11)
+stn.ijkdata('Reaction_1', 'Reactor', 'Slow', 6, 7, 0.27*7)
+stn.ijkdata('Reaction_1', 'Reactor', 'Normal', 4, 9, 0.27*9)
+stn.ijkdata('Reaction_2', 'Reactor', 'Slow', 10, 5, 0.27*5)
+stn.ijkdata('Reaction_2', 'Reactor', 'Normal', 6, 13, 0.27*13)
 
 # time horizons
 Ts = 30
@@ -85,7 +85,11 @@ for i in range(0, len(TIMEp)):
 model.solve([Ts, dTs, Tp, dTp],
             solver="cplex",
             objective="terminal",
-            periods=5,
-            prefix="toy2D",
+            # periods=5,
+            prefix="toy2R",
             rdir="/home/jw3617/STN/results",
+            save=True,
+            trace=True,
             tindexed=False)
+ph = model.calc_p_fail("Heater")
+import ipdb; ipdb.set_trace()  # noqa

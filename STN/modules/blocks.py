@@ -14,14 +14,21 @@ import pyomo.environ as pyomo
 from pyomo.opt import SolverStatus, TerminationCondition
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import dill
 import sys
 import matplotlib.pyplot as plt
 
 
 class stnBlock(object):
+    """Template for planning and scheduling blocks."""
 
     def __init__(self, stn, T_list, Demand={}, **kwargs):
+        """
+        stn: object of class stnStruct
+        T_list: [Tstart, Tend, dT]
+        Demand: dictionary of demands indexed by (product, time)
+        """
         self.stn = stn
         self.T = T_list[1]
         self.dT = T_list[2]
@@ -30,6 +37,7 @@ class stnBlock(object):
         self.Demand = Demand
 
     def demand(self, state, time, Demand):
+        """Set demand for state at time."""
         self.Demand[state, time] = Demand
 
     def build(self, **kwargs):
@@ -47,6 +55,7 @@ class stnBlock(object):
     def solve(self, solver='cplex', prefix='',
               rdir='results', solverparams=None,
               save=False, trace=False, gantt=True, **kwargs):
+        """Solves the block. Only call when block is used individually."""
         self.solver = pyomo.SolverFactory(solver)
         if solverparams is not None:
             for key, value in solverparams.items():
@@ -81,6 +90,7 @@ class stnBlock(object):
             self.inf = False
 
     def define_block(self, b, **kwargs):
+        """Add variables, constraints, and objective function to model."""
         self.b = b
         b.TIME = self.TIME
         b.T = self.T
@@ -117,6 +127,7 @@ class stnBlock(object):
 
 
 class blockScheduling(stnBlock):
+    """Implements deterministic constraints for the scheduling horizon"""
 
     def __init__(self, stn, TIME, Demand={}, **kwargs):
         super().__init__(stn, TIME, Demand, **kwargs)
@@ -202,19 +213,24 @@ class blockScheduling(stnBlock):
             for t in self.TIME:
                 # constraints on F[j,t] and R[j,t]
                 # TODO: these are obsolete?
-                b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
-                b.cons.add(b.F[j, t] <= stn.Rmax[j] - rhs)
-                b.cons.add(b.F[j, t] >= stn.Rmax[j]*b.M[j, t] - rhs)
-                b.cons.add(0 <= b.R[j, t] <= stn.Rmax[j])
+                # b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+                # b.cons.add(b.F[j, t] <= stn.Rmax[j] - rhs)
+                # b.cons.add(b.F[j, t] >= stn.Rmax[j]*b.M[j, t] - rhs)
+                b.cons.add(0 <= b.R[j, t])
+                b.cons.add(b.R[j, t] <= stn.Rmax[j]*(1 - b.M[j, t]))
                 # residual life balance
                 for i in stn.I[j]:
                     for k in stn.O[j]:
-                        rhs -= stn.D[i, j, k]*b.W[i, j, k, t]
-                rhs += b.F[j, t]
-                b.cons.add(b.R[j, t] == rhs)
+                        rhs += stn.D[i, j, k]*b.W[i, j, k, t]
+                # rhs += b.F[j, t]
+                # b.cons.add(b.R[j, t] == rhs)
+                b.cons.add(b.R[j, t] >= rhs - stn.Rmax[j]*b.M[j, t])
+                b.cons.add(b.R[j, t] <= rhs)
+                rhs = b.R[j, t]
 
-    def add_objective(self, **kwargs):
+    def add_objective(self, objective=None, **kwargs):
         """Add objective function to model."""
+        assert objective is not None
         b = self.b
         stn = self.stn
 
@@ -229,10 +245,30 @@ class blockScheduling(stnBlock):
                 costMaintenance += ((stn.a[j] - stn.b[j])
                                     * b.M[j, t])
         b.cons.add(b.CostMaintenance == costMaintenance)
+        costWear = 0
+        if objective == "biondi":
+            costWear += self.calc_cost_wear()
+        b.cons.add(b.CostWear == costWear)
         b.cons.add(b.Cost == b.CostStorage + b.CostMaintenance +
-                   b.CostMaintenanceFinal)
+                   b.CostMaintenanceFinal + b.CostWear)
+
+    def calc_cost_wear(self):
+        """Calculate wear penalty (Biondi)."""
+        b = self.b
+        stn = self.stn
+
+        costTotal = 0
+        for t in self.TIME:
+            costWear = 0
+            for j in stn.units:
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        costWear += stn.D[i, j, k]*b.W[i, j, k, t]
+            costTotal += costWear
+        return costTotal
 
     def add_demand_constraint(self):
+        """Add demand constraint when block is used individually."""
         stn = self.stn
         b = self.b
         for s in stn.states:
@@ -250,21 +286,40 @@ class blockScheduling(stnBlock):
             b.cons.add(b.Sfin[s] == rhs)
             b.cons.add(0 <= b.Sfin[s] <= stn.C[s])
 
-    def build(self, **kwargs):
-        super().build(**kwargs)
+    def build(self, objective="terminal", alpha=0.5, **kwargs):
+        """Only use when block is solved individually."""
+        # replace D by Dmax if alpha != 0.5
         stn = self.stn
+        if alpha != 0.5:
+            for j in stn.units:
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        tm = i + "-" + k
+                        D = stn.D[i, j, k]
+                        p = stn.p[i, j, k]
+                        X = stn.deg[j].get_quantile(alpha, tm, p)
+                        stn.D[i, j, k] = 2*D - X
+        super().build(objective=objective, **kwargs)
         b = self.b
-        self.calc_cost_maintenance_terminal()
-        self.add_demand_constraint()
+        if objective == "terminal":
+            # calculate terminal maint cost
+            self.calc_cost_maintenance_terminal()
+        elif objective == "biondi":
+            b.cons.add(b.CostMaintenanceFinal == 0)
+        else:
+            raise KeyError("KeyError: unknown objective %s" % objective)
+
+        self.add_demand_constraint()            # add demand constraint
+        # add slack for unfullfilled demand
         for s in stn.states:
             for t in self.TIME:
                 b.cons.add(b.Sslack[s, t] == 0)
 
     def define_block(self, b, **kwargs):
-        # Define affine decision rule
         super().define_block(b, **kwargs)
 
     def add_vars(self, **kwargs):
+        """Add variables to model."""
         b = self.b
         stn = self.stn
 
@@ -295,24 +350,29 @@ class blockScheduling(stnBlock):
         # Variables for continuity between scheduling and planning horizon
         b.Sfin = pyomo.Var(stn.states, domain=pyomo.NonNegativeReals)
 
+        # cost components and total cost
         b.CostStorage = pyomo.Var(domain=pyomo.NonNegativeReals)
         b.CostMaintenance = pyomo.Var(domain=pyomo.NonNegativeReals)
         b.CostMaintenanceFinal = pyomo.Var(domain=pyomo.NonNegativeReals)
+        b.CostWear = pyomo.Var(domain=pyomo.NonNegativeReals)
         b.Cost = pyomo.Var(domain=pyomo.NonNegativeReals)
+        # slack for unfulfilled demand
         b.Sslack = pyomo.Var(stn.states, self.TIME,
                              domain=pyomo.NonNegativeReals)
 
     def calc_cost_maintenance_terminal(self):
+        """Calculate terminal cost of maintenance."""
         stn = self.stn
         b = self.b
         costFinal = 0
         for j in stn.units:
-            costFinal += ((1 - b.R[j, self.T - self.dT]
+            costFinal += ((b.R[j, self.T - self.dT]
                            / stn.Rmax[j])
                           * (stn.a[j] - stn.b[j]))
         b.cons.add(b.CostMaintenanceFinal == costFinal)
 
     def check_for_task(self, j, t):
+        """Check if task is being performed on unit j at time t."""
         b = self.b
         stn = self.stn
         tend = t
@@ -332,6 +392,7 @@ class blockScheduling(stnBlock):
         return [i, k, tend]
 
     def get_unit_profile(self, j, full=True):
+        """Get sequence of operating modes for unit j."""
         cols = ["time", "unit", "task", "mode"]
         prods = set(self.Demand.keys())
         demand = []
@@ -356,6 +417,11 @@ class blockScheduling(stnBlock):
         return profile
 
     def gantt(self, prefix='', rdir=None):
+        """
+        Generate gantt graph.
+            prefix: prepended to file name
+            rdir: directory to store file
+        """
         assert rdir is not None
         b = self.b
         stn = self.stn
@@ -376,6 +442,11 @@ class blockScheduling(stnBlock):
                             jstart[j] = min(jstart[j], t)
         jsorted = [j for (j, t) in sorted(jstart.items(),  key=lambda x: x[1])]
         jsorted = sorted(stn.units)
+
+        mode_palette = sns.color_palette("YlOrRd", len(stn.opmodes))
+        mode_col = {}
+        for mode in stn.opmodes:
+            mode_col.update({mode: mode_palette[stn.modeorder[mode]]})
 
         # number of horizontal bars to draw
         nbars = -1
@@ -400,13 +471,12 @@ class blockScheduling(stnBlock):
                         lbls.append("{0:s} -> {1:s}".format(j, i))
                     for k in stn.O[j]:
                         if b.W[i, j, k, t]() > 0.5:
-                            col = {'Slow': 'green', 'Normal': 'yellow',
-                                   'Fast': 'red'}  # TODO: shouldn't be explicit
+                            # TODO: shouldn't be explicit
                             plt.plot([t, t+stn.p[i, j, k]],
                                      [idx, idx], 'k',  lw=24,
                                      alpha=0.5, solid_capstyle='butt')
                             plt.plot([t+gap, t+stn.p[i, j, k]-gap],
-                                     [idx, idx], color=col[k], lw=20,
+                                     [idx, idx], color=mode_col[k], lw=20,
                                      solid_capstyle='butt')
                             txt = "{0:.2f}".format(b.B[i, j, k, t]())
                             plt.text(t+stn.p[i, j, k]/2, idx,  txt,
@@ -430,6 +500,11 @@ class blockScheduling(stnBlock):
         plt.close("all")
 
     def trace(self, prefix='', rdir=None):
+        """
+        Generate trace.
+            prefix: prepended to file name
+            rdir: directory to store file
+        """
         assert rdir is not None
         # abbreviations
         b = self.b
@@ -530,10 +605,22 @@ class blockSchedulingRobust(blockScheduling):
     def __init__(self, stn, TIME, Demand={}, **kwargs):
         super().__init__(stn, TIME, Demand, **kwargs)
 
-    def build(self, decisionrule="continuous", tindexed=False, **kwargs):
+    def build(self, decisionrule="continuous", tindexed=False, alpha=0.5,
+              **kwargs):
+        self.alpha = alpha
+        stn = self.stn
+        for j in stn.units:
+            for i in stn.I[j]:
+                for k in stn.O[j]:
+                    tm = i + "-" + k
+                    p = stn.p[i, j, k]
+                    D = stn.D[i, j, k]
+                    stn.eps[i, j, k] = 1 - stn.deg[j].get_quantile(alpha,
+                                                                   tm, p)/D
         super().build(decisionrule=decisionrule, tindexed=tindexed, **kwargs)
 
-    def calc_nominal_R(self, tindexed=None):
+    def calc_nominal_R(self, tindexed=None, **kwargs):
+        """ calculate R using nominal values of D."""
         assert tindexed is not None
         b = self.b
         stn = self.stn
@@ -550,7 +637,8 @@ class blockSchedulingRobust(blockScheduling):
                             rhs += stn.D[i, j, k]*b.Rc[j, t, i, k]
                 b.cons.add(b.R[j, t] == rhs)
 
-    def calc_max_R(self, tindexed=None):
+    def calc_max_R(self, tindexed=None, **kwargs):
+        """Calculate R using maximal values of D."""
         assert tindexed is not None
         b = self.b
         stn = self.stn
@@ -563,11 +651,11 @@ class blockSchedulingRobust(blockScheduling):
                         if tindexed:
                             for tprime in self.TIME[self.TIME <= t]:
                                 rhs += (stn.D[i, j, k]
-                                        * (1 + stn.eps)
+                                        * (1 + stn.eps[i, j, k])
                                         * b.Rc[j, t, i, k, tprime])
                         else:
                             rhs += (stn.D[i, j, k]
-                                    * (1 + stn.eps)
+                                    * (1 + stn.eps[i, j, k])
                                     * b.Rc[j, t, i, k])
                 b.cons.add(b.Rmax[j, t] == rhs)
 
@@ -591,12 +679,13 @@ class blockSchedulingRobust(blockScheduling):
                          domain=pyomo.NonNegativeReals)
 
     def calc_cost_maintenance_terminal(self):
+        """Calculate terminal cost of maintenance (robust)."""
         b = self.b
         stn = self.stn
 
         costFinal = 0
         for j in stn.units:
-            costFinal += ((b.R[j, self.T - self.dT]
+            costFinal += ((b.Rmax[j, self.T - self.dT]
                            / stn.Rmax[j])
                           * (stn.a[j] - stn.b[j]))
         b.cons.add(b.CostMaintenanceFinal == costFinal)
@@ -643,13 +732,16 @@ class blockSchedulingRobust(blockScheduling):
     def define_block(self, b, decisionrule=None, **kwargs):
         # Define affine decision rule
         super().define_block(b, decisionrule=decisionrule, **kwargs)
+        # calculate nominal and maximal R
         self.calc_nominal_R(**kwargs)
         self.calc_max_R(**kwargs)
         assert decisionrule is not None
+        # add extra constraints if integer decision rule is used
         if decisionrule == "integer":
-            self.add_int_decision_rule_cons(decisionrule=decisionrule)
+            self.add_int_decision_rule_cons(**kwargs)
 
     def add_deg_constraints(self, tindexed=None, **kwargs):
+        """Add degradation constraints."""
         assert tindexed is not None
         if tindexed:
             self.add_deg_constraints_tindexed()
@@ -657,7 +749,7 @@ class blockSchedulingRobust(blockScheduling):
             self.add_deg_constraints_not_tindexed()
 
     def add_deg_constraints_tindexed(self):
-        """Add robust degredation constraints.
+        """Add robust degredation constraints (tindexed: D[i,j,k,t]).
 
         Note:
             The residual lifetime R has a different interpretation in the
@@ -684,9 +776,9 @@ class blockSchedulingRobust(blockScheduling):
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
-                                    * ((1 + stn.eps)
+                                    * ((1 + stn.eps[i, j, k])
                                        * b.ud[1, j, t, i, k, tprime]
-                                       - (1 - stn.eps)
+                                       - (1 - stn.eps[i, j, k])
                                        * b.ld[1, j, t, i, k, tprime]))
                             b.cons.add(b.ud[1, j, t, i, k, tprime] -
                                        b.ld[1, j, t, i, k, tprime] >= -
@@ -700,9 +792,9 @@ class blockSchedulingRobust(blockScheduling):
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
-                                    * ((1 + stn.eps)
+                                    * ((1 + stn.eps[i, j, k])
                                        * b.ud[2, j, t, i, k, tprime]
-                                       - (1 - stn.eps)
+                                       - (1 - stn.eps[i, j, k])
                                        * b.ld[2, j, t, i, k, tprime]))
                             b.cons.add(b.ud[2, j, t, i, k, tprime] -
                                        b.ld[2, j, t, i, k, tprime] >=
@@ -721,9 +813,9 @@ class blockSchedulingRobust(blockScheduling):
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
-                                    * ((1 + stn.eps)
+                                    * ((1 + stn.eps[i, j, k])
                                        * b.ud[3, j, t, i, k, tprime]
-                                       - (1 - stn.eps)
+                                       - (1 - stn.eps[i, j, k])
                                        * b.ld[3, j, t, i, k, tprime]))
 
                             if (t > self.TIME[0]):
@@ -756,9 +848,9 @@ class blockSchedulingRobust(blockScheduling):
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
-                                    * ((1 + stn.eps)
+                                    * ((1 + stn.eps[i, j, k])
                                        * b.ud[4, j, t, i, k, tprime]
-                                       - (1 - stn.eps)
+                                       - (1 - stn.eps[i, j, k])
                                        * b.ld[4, j, t, i, k, tprime]))
 
                             if (t > self.TIME[0]):
@@ -780,7 +872,7 @@ class blockSchedulingRobust(blockScheduling):
                 b.cons.add(lhs <= rhs)
 
     def add_deg_constraints_not_tindexed(self):
-        """Add robust degredation constraints.
+        """Add robust degredation constraints (not tindexed: D[i,j,k]).
 
         Note:
             The residual lifetime R has a different interpretation in the
@@ -806,9 +898,9 @@ class blockSchedulingRobust(blockScheduling):
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         lhs += (stn.D[i, j, k]
-                                * ((1 + stn.eps)
+                                * ((1 + stn.eps[i, j, k])
                                    * b.ud[1, j, t, i, k]
-                                   - (1 - stn.eps)
+                                   - (1 - stn.eps[i, j, k])
                                    * b.ld[1, j, t, i, k]))
                         b.cons.add(b.ud[1, j, t, i, k] -
                                    b.ld[1, j, t, i, k] >= -
@@ -821,9 +913,9 @@ class blockSchedulingRobust(blockScheduling):
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         lhs += (stn.D[i, j, k]
-                                * ((1 + stn.eps)
+                                * ((1 + stn.eps[i, j, k])
                                    * b.ud[2, j, t, i, k]
-                                   - (1 - stn.eps)
+                                   - (1 - stn.eps[i, j, k])
                                    * b.ld[2, j, t, i, k]))
                         b.cons.add(b.ud[2, j, t, i, k] -
                                    b.ld[2, j, t, i, k] >=
@@ -841,9 +933,9 @@ class blockSchedulingRobust(blockScheduling):
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         lhs += (stn.D[i, j, k]
-                                * ((1 + stn.eps)
+                                * ((1 + stn.eps[i, j, k])
                                    * b.ud[3, j, t, i, k]
-                                   - (1 - stn.eps)
+                                   - (1 - stn.eps[i, j, k])
                                    * b.ld[3, j, t, i, k]))
 
                         if (t > self.TIME[0]):
@@ -870,9 +962,9 @@ class blockSchedulingRobust(blockScheduling):
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         lhs += (stn.D[i, j, k]
-                                * ((1 + stn.eps)
+                                * ((1 + stn.eps[i, j, k])
                                    * b.ud[4, j, t, i, k]
-                                   - (1 - stn.eps)
+                                   - (1 - stn.eps[i, j, k])
                                    * b.ld[4, j, t, i, k]))
 
                         if (t > self.TIME[0]):
@@ -888,8 +980,8 @@ class blockSchedulingRobust(blockScheduling):
                 rhs = -b.R0[j, t] + R0Last
                 b.cons.add(lhs <= rhs)
 
-    def add_int_decision_rule_cons(self, tindexed=None):
-        """Define affine decision rule for residual lifetime."""
+    def add_int_decision_rule_cons(self, tindexed=None, **kwargs):
+        """Define affine integer decision rule for residual lifetime."""
         assert tindexed is not None
         b = self.b
         stn = self.stn
@@ -913,25 +1005,11 @@ class blockSchedulingRobust(blockScheduling):
                                            <= b.Rc[j, t - self.dT,
                                                    i, k, tprime])
         else:
-            for t in self.TIME:
-                for j in stn.units:
-                    for i in stn.I[j]:
-                        for k in stn.O[j]:
-                            b.cons.add(b.Rc[j, t, i, k] == b.W[i, j, k, t])
-                            b.cons.add(b.Rc[j, t, i, k] <= 1 - b.M[j, t])
-                            for tprime in self.TIME[self.TIME < t]:
-                                b.cons.add(b.Rc[j, t, i, k, tprime]
-                                           >= b.Rc[j, t - self.dT,
-                                                   i, k, tprime]
-                                           - b.M[j, t])
-                                b.cons.add(b.Rc[j, t, i, k, tprime]
-                                           <= 1 - b.M[j, t])
-                                b.cons.add(b.Rc[j, t, i, k, tprime]
-                                           <= b.Rc[j, t - self.dT,
-                                                   i, k, tprime])
+            raise NotImplementedError
 
 
 class blockPlanning(stnBlock):
+    """Implements deterministic constraints for the planning horizon"""
 
     def __init__(self, stn, TIME, Demand={}, **kwargs):
         super().__init__(stn, TIME, Demand, **kwargs)
@@ -1004,18 +1082,39 @@ class blockPlanning(stnBlock):
                 # residual life balance
                 for i in stn.I[j]:
                     for k in stn.O[j]:
-                        rhs -= stn.D[i, j, k]*b.N[i, j, k, t]
-                rhs += b.F[j, t]
-                b.cons.add(b.R[j, t] == rhs)
+                        rhs += stn.D[i, j, k]*b.N[i, j, k, t]
+                # rhs += b.F[j, t]
+                # b.cons.add(b.R[j, t] == rhs)
                 # constraints on R and F
                 b.cons.add(0 <= b.R[j, t] <= stn.Rmax[j])
-                b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+                # b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+                b.cons.add(b.R[j, t] >= rhs - stn.Rmax[j]*b.M[j, t])
+                b.cons.add(b.R[j, t] <= rhs)
+                rhs = b.R[j, t]
 
-    def build(self, **kwargs):
-        super().build(**kwargs)
+    def build(self, objective="terminal", alpha=0.5, **kwargs):
+        """ Only used if block is solved individually."""
+        # replace D by Dmax if alpha != 0.5
+        stn = self.stn
+        if alpha != 0.5:
+            for j in stn.units:
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        tm = i + "-" + k
+                        D = stn.D[i, j, k]
+                        p = stn.p[i, j, k]
+                        X = stn.deg[j].get_quantile(alpha, tm, p)
+                        stn.D[i, j, k] = 2*D - X
+        super().build(objective=objective, **kwargs)
+        # set intial values
         self.set_initial_values()
+        b = self.b
+        for s in stn.states:
+            for t in self.TIME:
+                b.cons.add(b.Dslack[s, t] == 0)
 
     def calc_cost_storage(self):
+        """Calculate cost of storage."""
         b = self.b
         stn = self.stn
 
@@ -1030,6 +1129,7 @@ class blockPlanning(stnBlock):
         return costTotal
 
     def calc_cost_maintenance(self):
+        """Calculate cost of maintenance."""
         b = self.b
         stn = self.stn
         costTotal = 0
@@ -1043,6 +1143,7 @@ class blockPlanning(stnBlock):
         return costTotal
 
     def calc_cost_wear(self):
+        """Calculate wear penalty (Biondi)."""
         b = self.b
         stn = self.stn
 
@@ -1057,8 +1158,9 @@ class blockPlanning(stnBlock):
             costTotal += costWear
         return costTotal
 
-    def add_objective(self, objective="terminal", **kwargs):
+    def add_objective(self, objective=None, **kwargs):
         """Add objective function to model."""
+        assert objective is not None
         b = self.b
         stn = self.stn
 
@@ -1069,8 +1171,8 @@ class blockPlanning(stnBlock):
         elif objective == "terminal":
             costFinal = 0
             for j in stn.units:
-                costFinal += ((stn.Rmax[j]
-                               - b.R[j, self.T - self.dT])
+                costFinal += (
+                              b.R[j, self.T - self.dT]
                               / stn.Rmax[j]
                               * (stn.a[j] - stn.b[j]))
             b.cons.add(b.CostMaintenanceFinal == costFinal)
@@ -1080,6 +1182,7 @@ class blockPlanning(stnBlock):
         b.cons.add(b.Cost == cost)
 
     def add_vars(self, **kwargs):
+        """Add variables to model."""
         b = self.b
         stn = self.stn
 
@@ -1128,6 +1231,7 @@ class blockPlanning(stnBlock):
         b.TotSlack = pyomo.Var(domain=pyomo.NonNegativeReals)
 
     def set_initial_values(self):
+        """Set initial values."""
         stn = self.stn
         b = self.b
 
@@ -1139,6 +1243,11 @@ class blockPlanning(stnBlock):
             b.cons.add(b.Rtransfer[j] == stn.Rinit[j])
 
     def gantt(self, prefix='', rdir=None):
+        """
+        Generate gantt graph.
+            prefix: prepended to file name
+            rdir: directory to store file
+        """
         assert rdir is not None
         stn = self.stn
         b = self.b
@@ -1148,10 +1257,14 @@ class blockPlanning(stnBlock):
         lbls = []
         ticks = []
         # TODO: This is stupid!
-        col = {'Heating': 'green', 'Reaction_1': 'yellow',
-               'Reaction_3': 'red', 'Reaction_2': 'orange',
-               'Separation': 'blue'}
-        pat = {'Slow': 'yellow', 'Normal': 'orange', 'Fast': 'red'}
+        task_palette = sns.color_palette("Set2", len(stn.tasks))
+        task_col = {}
+        for task in stn.tasks:
+            task_col.update({task: task_palette.pop()})
+        mode_palette = sns.color_palette("YlOrRd", len(stn.opmodes))
+        mode_col = {}
+        for mode in stn.opmodes:
+            mode_col.update({mode: mode_palette[stn.modeorder[mode]]})
         jsorted = sorted(stn.units)
 
         # number of horizontal bars to draw
@@ -1179,10 +1292,10 @@ class blockPlanning(stnBlock):
                                        + b.N[i, j, k, t]()
                                        * stn.p[i, j, k])
                             plt.plot([tau, tauNext],
-                                     [idx, idx], color=pat[k],
+                                     [idx, idx], color=mode_col[k],
                                      lw=24, solid_capstyle='butt')
                             plt.plot([tau+gap, tauNext-gap],
-                                     [idx, idx], color=col[i],
+                                     [idx, idx], color=task_col[i],
                                      lw=20, solid_capstyle='butt')
                             txt = "{0:d}".format(int(b.N[i, j, k, t]()))
                             plt.text((tau+tauNext)/2,  idx,
@@ -1205,6 +1318,11 @@ class blockPlanning(stnBlock):
         plt.savefig(rdir+"/"+prefix+'gantt_planning.png')
 
     def trace(self, prefix='', rdir=None):
+        """
+        Generate trace.
+            prefix: prepended to file name
+            rdir: directory to store file
+        """
         assert rdir is not None
         # abbreviations
         b = self.b
@@ -1265,15 +1383,27 @@ class blockPlanning(stnBlock):
 
 
 class blockPlanningRobust(blockPlanning):
-    """Implements robust constraints for the scheduling horizon"""
+    """Implements robust constraints for the planning horizon"""
 
     def __init__(self, stn, TIME, Demand, **kwargs):
         super().__init__(stn, TIME, Demand, **kwargs)
 
-    def build(self, decisionrule="continuous", tindexed=False, **kwargs):
+    def build(self, decisionrule="continuous", tindexed=False, alpha=0.5,
+              **kwargs):
+        self.alpha = alpha
+        stn = self.stn
+        for j in stn.units:
+            for i in stn.I[j]:
+                for k in stn.O[j]:
+                    tm = i + "-" + k
+                    p = stn.p[i, j, k]
+                    D = stn.D[i, j, k]
+                    stn.eps[i, j, k] = 1 - stn.deg[j].get_quantile(alpha,
+                                                                   tm, p)/D
         super().build(decisionrule=decisionrule, tindexed=tindexed, **kwargs)
 
-    def calc_nominal_R(self, tindexed=None):
+    def calc_nominal_R(self, tindexed=None, **kwargs):
+        """Calculate R based on nominal values."""
         assert tindexed is not None
         b = self.b
         stn = self.stn
@@ -1290,8 +1420,31 @@ class blockPlanningRobust(blockPlanning):
                             rhs += stn.D[i, j, k]*b.Rc[j, t, i, k]
                 b.cons.add(b.R[j, t] == rhs)
 
-    def add_objective(self, objective="terminal", **kwargs):
+    def calc_max_R(self, tindexed=None, **kwargs):
+        """Calculate R based on nominal values."""
+        assert tindexed is not None
+        b = self.b
+        stn = self.stn
+
+        for j in stn.units:
+            for t in self.TIME:
+                rhs = b.R0[j, t]
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        if tindexed:
+                            for tprime in self.TIME[self.TIME <= t]:
+                                rhs += (stn.D[i, j, k]
+                                        * (1+stn.eps[i, j, k])
+                                        * b.Rc[j, t, i, k, tprime])
+                        else:
+                            rhs += (stn.D[i, j, k]
+                                    * (1 + stn.eps[i, j, k])
+                                    * b.Rc[j, t, i, k])
+                b.cons.add(b.Rmax[j, t] == rhs)
+
+    def add_objective(self, objective=None, **kwargs):
         """Add objective function to model."""
+        assert objective is not None
         b = self.b
         stn = self.stn
 
@@ -1302,7 +1455,7 @@ class blockPlanningRobust(blockPlanning):
         elif objective == "terminal":
             costFinal = 0
             for j in stn.units:
-                costFinal += (b.R[j, self.T - self.dT]
+                costFinal += (b.Rmax[j, self.T - self.dT]
                               / stn.Rmax[j]
                               * (stn.a[j] - stn.b[j]))
             b.cons.add(b.CostMaintenanceFinal == costFinal)
@@ -1311,6 +1464,7 @@ class blockPlanningRobust(blockPlanning):
         b.cons.add(b.Cost == cost + costFinal)
 
     def add_vars(self, decisionrule=None, tindexed=None, **kwargs):
+        """Add variables to model."""
         assert decisionrule is not None
         assert tindexed is not None
         if decisionrule == "continuous":
@@ -1322,6 +1476,9 @@ class blockPlanningRobust(blockPlanning):
             self.add_vars_tindexed(domain)
         else:
             self.add_vars_not_tindexed(domain)
+        b = self.b
+        stn = self.stn
+        b.Rmax = pyomo.Var(stn.units, self.TIME, domain=pyomo.NonNegativeReals)
         super().add_vars(**kwargs)
 
     def add_vars_tindexed(self, domain):
@@ -1374,9 +1531,10 @@ class blockPlanningRobust(blockPlanning):
         # Define affine decision rule
         super().define_block(b, decisionrule=decisionrule, **kwargs)
         self.calc_nominal_R(**kwargs)
+        self.calc_max_R(**kwargs)
         assert decisionrule is not None
-        # if decisionrule == "integer":
-        #     self.add_int_decision_rule_cons()
+        if decisionrule == "integer":
+            self.add_int_decision_rule_cons(**kwargs)
 
     def add_deg_constraints(self, tindexed=None, **kwargs):
         assert tindexed is not None
@@ -1387,7 +1545,7 @@ class blockPlanningRobust(blockPlanning):
             self.add_deg_constraints_not_tindexed()
 
     def add_deg_constraints_tindexed(self, **kwargs):
-        """Add robust degredation constraints.
+        """Add robust degredation constraints (tindexed: D[i,j,k,t]).
 
         Note:
             The residual lifetime R has a different interpretation in the
@@ -1410,9 +1568,9 @@ class blockPlanningRobust(blockPlanning):
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
-                                    * ((1 + stn.eps)
+                                    * ((1 + stn.eps[i, j, k])
                                        * b.ud[1, j, t, i, k, tprime]
-                                       - (1 - stn.eps)
+                                       - (1 - stn.eps[i, j, k])
                                        * b.ld[1, j, t, i, k, tprime]))
                             b.cons.add(b.ud[1, j, t, i, k, tprime] -
                                        b.ld[1, j, t, i, k, tprime] >=
@@ -1426,9 +1584,9 @@ class blockPlanningRobust(blockPlanning):
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
-                                    * ((1 + stn.eps)
+                                    * ((1 + stn.eps[i, j, k])
                                        * b.ud[2, j, t, i, k, tprime]
-                                       - (1 - stn.eps)
+                                       - (1 - stn.eps[i, j, k])
                                        * b.ld[2, j, t, i, k, tprime]))
 
                             # in the first time period R = Rtransfer
@@ -1460,9 +1618,9 @@ class blockPlanningRobust(blockPlanning):
                     for k in stn.O[j]:
                         for tprime in self.TIME[self.TIME <= t]:
                             lhs += (stn.D[i, j, k]
-                                    * ((1 + stn.eps)
+                                    * ((1 + stn.eps[i, j, k])
                                        * b.ud[3, j, t, i, k, tprime]
-                                       - (1 - stn.eps)
+                                       - (1 - stn.eps[i, j, k])
                                        * b.ld[3, j, t, i, k, tprime]))
 
                             # in the first time period R = Rtransfer
@@ -1488,7 +1646,7 @@ class blockPlanningRobust(blockPlanning):
                 b.cons.add(lhs <= rhs)
 
     def add_deg_constraints_not_tindexed(self, **kwargs):
-        """Add robust degredation constraints.
+        """Add robust degredation constraints (not tindexed: D[i,j,k]).
 
         Note:
             The residual lifetime R has a different interpretation in the
@@ -1510,9 +1668,9 @@ class blockPlanningRobust(blockPlanning):
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         lhs += (stn.D[i, j, k]
-                                * ((1 + stn.eps)
+                                * ((1 + stn.eps[i, j, k])
                                    * b.ud[1, j, t, i, k]
-                                   - (1 - stn.eps)
+                                   - (1 - stn.eps[i, j, k])
                                    * b.ld[1, j, t, i, k]))
                         b.cons.add(b.ud[1, j, t, i, k] -
                                    b.ld[1, j, t, i, k] >=
@@ -1525,9 +1683,9 @@ class blockPlanningRobust(blockPlanning):
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         lhs += (stn.D[i, j, k]
-                                * ((1 + stn.eps)
+                                * ((1 + stn.eps[i, j, k])
                                    * b.ud[2, j, t, i, k]
-                                   - (1 - stn.eps)
+                                   - (1 - stn.eps[i, j, k])
                                    * b.ld[2, j, t, i, k]))
 
                         # in the first time period R = Rtransfer
@@ -1552,9 +1710,9 @@ class blockPlanningRobust(blockPlanning):
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         lhs += (stn.D[i, j, k]
-                                * ((1 + stn.eps)
+                                * ((1 + stn.eps[i, j, k])
                                    * b.ud[3, j, t, i, k]
-                                   - (1 - stn.eps)
+                                   - (1 - stn.eps[i, j, k])
                                    * b.ld[3, j, t, i, k]))
 
                         # in the first time period R = Rtransfer
@@ -1573,39 +1731,45 @@ class blockPlanningRobust(blockPlanning):
                 rhs = -b.R0[j, t] + R0Last
                 b.cons.add(lhs <= rhs)
 
-    def add_int_decision_rule_cons(self):
-        """Define affine decision rule for residual lifetime."""
+    def add_int_decision_rule_cons(self, tindexed=None, **kwargs):
+        """Define affine integer decision rule for residual lifetime."""
+        assert tindexed is not None
         b = self.b
         stn = self.stn
         U = 56  # TODO: make this dependent on len(sb.TIME)
-        for t in self.TIME:
-            for j in stn.units:
-                for i in stn.I[j]:
-                    for k in stn.O[j]:
-                        if (t == self.TIME[0]):
-                            b.cons.add(b.Rc[j, t, i, k, t]
-                                       >= b.N[i, j, k, t]
-                                       + b.Rctransfer[j, i, k]
-                                       - U*b.M[j, t])
-                            b.cons.add(b.Rc[j, t, i, k, t]
-                                       >= b.N[i, j, k, t])
-                            b.cons.add(b.Rc[j, t, i, k, t]
-                                       <= b.N[i, j, k, t]
-                                       + b.Rctransfer[j, i, k])
-                            b.cons.add(b.Rc[j, t, i, k, t]
-                                       <= b.N[i, j, k, t]
-                                       + U*(1 - b.M[j, t]))
-                        else:
-                            b.cons.add(b.Rc[j, t, i, k, t]
-                                       <= b.N[i, j, k, t])
-                            b.cons.add(b.Rc[j, t, i, k, t]
-                                       >= b.N[i, j, k, t]
-                                       - U*b.M[j, t])
-                        for tprime in self.TIME[self.TIME < t]:
-                            b.cons.add(b.Rc[j, t, i, k, tprime]
-                                       >= b.Rc[j, t - self.dT, i, k, tprime]
-                                       - b.M[j, t]*U)
-                            b.cons.add(b.Rc[j, t, i, k, tprime]
-                                       <= (1 - b.M[j, t])*U)
-                            b.cons.add(b.Rc[j, t, i, k, tprime]
-                                       <= b.Rc[j, t - self.dT, i, k, tprime])
+        if tindexed:
+            for t in self.TIME:
+                for j in stn.units:
+                    for i in stn.I[j]:
+                        for k in stn.O[j]:
+                            if (t == self.TIME[0]):
+                                b.cons.add(b.Rc[j, t, i, k, t]
+                                           >= b.N[i, j, k, t]
+                                           + b.Rctransfer[j, i, k]
+                                           - U*b.M[j, t])
+                                b.cons.add(b.Rc[j, t, i, k, t]
+                                           >= b.N[i, j, k, t])
+                                b.cons.add(b.Rc[j, t, i, k, t]
+                                           <= b.N[i, j, k, t]
+                                           + b.Rctransfer[j, i, k])
+                                b.cons.add(b.Rc[j, t, i, k, t]
+                                           <= b.N[i, j, k, t]
+                                           + U*(1 - b.M[j, t]))
+                            else:
+                                b.cons.add(b.Rc[j, t, i, k, t]
+                                           <= b.N[i, j, k, t])
+                                b.cons.add(b.Rc[j, t, i, k, t]
+                                           >= b.N[i, j, k, t]
+                                           - U*b.M[j, t])
+                            for tprime in self.TIME[self.TIME < t]:
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           >= b.Rc[j, t - self.dT,
+                                                   i, k, tprime]
+                                           - b.M[j, t]*U)
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           <= (1 - b.M[j, t])*U)
+                                b.cons.add(b.Rc[j, t, i, k, tprime]
+                                           <= b.Rc[j, t - self.dT,
+                                                   i, k, tprime])
+        else:
+            raise NotImplementedError

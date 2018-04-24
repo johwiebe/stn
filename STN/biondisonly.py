@@ -11,24 +11,21 @@ import pyDOE
 import pandas as pd
 import numpy as np
 sys.path.append('../STN/modules')
-from blocks2 import blockSchedulingRobust # noqa
+from blocks import blockScheduling # noqa
 
 # create instance
 
-with open("biondiRstruct.dat", "rb") as dill_file:
+with open("../data/biondiR.dat", "rb") as dill_file:
     stn = dill.load(dill_file)
 
-
-demand_1 = [150, 88, 125, 67, 166, 203, 90, 224, 174, 126, 66, 119, 234, 64,
-            103, 77, 132, 186, 174, 239, 124, 194, 91, 228]
-demand_2 = [200, 150, 197, 296, 191, 193, 214, 294, 247, 313, 226, 121, 197,
-            242, 220, 342, 355, 320, 335, 298, 252, 222, 324, 337]
 N = 200
 mlhs = pyDOE.lhs(2, samples=N, criterion="maximin")
 demand_1 = 50 + np.array([mlhs[i][0] for i in range(0, N)])*(250-50)
 demand_2 = 100 + np.array([mlhs[i][1] for i in range(0, N)])*(350-100)
 
-stn.Rinit["Reactor_1"] = stn.Rmax["Reactor_1"]
+for j in stn.units:
+    stn.Rinit[j] = 0
+# stn.Rinit["Reactor_1"] = stn.Rmax["Reactor_1"]
 
 Ts = 168
 dTs = 3
@@ -58,9 +55,9 @@ N = 1
 for i in range(0, N):
     rid += 1
     t = time.time()
-    model = blockSchedulingRobust(stn, [0, Ts, dTs],
-                                  {"Product_1": demand_1[i],
-                                   "Product_2": demand_2[i]})
+    model = blockScheduling(stn, [0, Ts, dTs],
+                            {"Product_1": demand_1[i],
+                             "Product_2": demand_2[i]})
     model.build()
     # model.uncertainty(0.1)
     solverparams = {

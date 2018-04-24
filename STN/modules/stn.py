@@ -5,17 +5,16 @@ Deterministic model of STN with degradation. Based on Biondi et al 2017.
 '''
 import pyomo.environ as pyomo
 from pyomo.opt import SolverStatus, TerminationCondition
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import dill
-import sys
-import csv
+from deg import degradationModel, calc_p_fail
 from blocks import (blockScheduling, blockSchedulingRobust,
                     blockPlanning, blockPlanningRobust)
 
 
 class stnModel(object):
+    """Deterministic model of the STN."""
     def __init__(self, stn=None):
         self.Demand = {}            # demand for products
         if stn is None:
@@ -26,13 +25,145 @@ class stnModel(object):
         self.gapmin = 100
         self.gapmax = 0
         self.gapmean = 0
+        self.alpha = 0.5
 
-    def demand(self, state, time, Demand):
-        """Add demand to model."""
-        self.Demand[state, time] = Demand
+    def solve(self, T_list, periods=1, solver='cplex', prefix='',
+              rdir='results', solverparams=None,
+              save=False, trace=False, gantt=True, **kwargs):
+        """
+        Solves the model
 
-    def uncertainty(self, eps):
-        self.stn.eps = eps
+            T_list: []
+            periods: number of rolling horizon periods
+            solver: specifies which solver to use
+            prefix: added to all file names
+            rdir: directory for result files
+            solverparams: dictionary of solver parameters
+            save: save results as .pyomo?
+            trace: generate trace?
+            gantt: generate gantt graphs?
+
+        """
+        # Initialize solver and set parameters
+        self.solver = pyomo.SolverFactory(solver)
+        if solverparams is not None:
+            for key, value in solverparams.items():
+                self.solver.options[key] = value
+        prefix_old = prefix
+
+        # Rolling horizon
+        for period in range(0, periods):
+            if periods > 1:
+                prefix = prefix_old + "_" + str(period)
+            # Build model
+            self.build(T_list, period=period, **kwargs)
+            logfile = rdir + "/" + prefix + "STN.log"
+            # Solve model
+            results = self.solver.solve(self.model,
+                                        tee=True,
+                                        keepfiles=True,
+                                        symbolic_solver_labels=True,
+                                        logfile=logfile)
+            results.write()
+            # Check if solver exited normally
+            if ((results.solver.status == SolverStatus.ok) and
+                (results.solver.termination_condition ==
+                 TerminationCondition.optimal or
+                 results.solver.termination_condition ==
+                 TerminationCondition.maxTimeLimit)):
+                # Calculate MIP Gap
+                obj = self.model.Obj()
+                gap = self.solver._gap
+                if gap is None:
+                    gap = 0.0
+                self.gapmin = min(self.gapmin,
+                                  gap/obj*100)
+                self.gapmax = max(self.gapmax,
+                                  gap/obj*100)
+                self.gapmean = (self.gapmean
+                                * period/(period+1)
+                                + (1 - period/(period + 1))
+                                * gap/obj*100)
+                # Save results
+                if save:
+                    with open(rdir+"/"+prefix+'output.txt', 'w') as f:
+                        f.write("STN Output:")
+                        self.model.display(ostream=f)
+                    with open(rdir+"/"+prefix+'STN.pyomo', 'wb') as dill_file:
+                        dill.dump(self.model, dill_file)
+                if gantt:
+                    self.sb.gantt(prefix=prefix, rdir=rdir)
+                    self.pb.gantt(prefix=prefix, rdir=rdir)
+                if trace:
+                    self.sb.trace(prefix=prefix, rdir=rdir)
+                    self.pb.trace(prefix=prefix, rdir=rdir)
+                if periods > 1:
+                    self.transfer_next_period(**kwargs)
+                # Add current model to list
+                self.m_list.append(self.model)
+            else:
+                break
+
+    def build(self, T_list, objective="terminal", period=None, alpha=0.5,
+              **kwargs):
+        """Build STN model."""
+        assert period is not None
+        self.model = pyomo.ConcreteModel()
+        m = self.model
+        stn = self.stn
+        m.cons = pyomo.ConstraintList()
+        m.ptransfer = pyomo.Var(stn.tasks, stn.units, stn.opmodes,
+                                domain=pyomo.NonNegativeReals)
+        m.Btransfer = pyomo.Var(stn.tasks, stn.units, stn.opmodes,
+                                domain=pyomo.NonNegativeReals)
+        m.tautransfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeReals)
+        m.Dslack = pyomo.Var(stn.states, domain=pyomo.NonNegativeReals)
+        m.TotSlack = pyomo.Var(domain=pyomo.NonNegativeReals)
+
+        # replace D by Dmax if alpha != 0.5
+        if alpha != 0.5:
+            self.alpha = alpha
+            for j in stn.units:
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        tm = i + "-" + k
+                        D = stn.D[i, j, k]
+                        p = stn.p[i, j, k]
+                        X = stn.deg[j].get_quantile(alpha, tm, p)
+                        stn.D[i, j, k] = 2*D - X
+
+        # scheduling and planning block
+        Ts = T_list[0]
+        dTs = T_list[1]
+        Tp = T_list[2]
+        dTp = T_list[3]
+        Ts_start = period * Ts
+        Tp_start = (period + 1) * Ts
+        Ts = Ts_start + Ts
+        Tp = Ts_start + Tp
+        self.add_blocks([Ts_start, Ts, dTs], [Tp_start, Tp, dTp],
+                        objective=objective, **kwargs)
+
+        # add continuity constraints to model
+        self.add_unit_constraints()
+        self.add_state_constraints()
+        self.add_deg_constraints(**kwargs)
+
+        # add objective function to model
+        self.add_objective()
+
+    def add_blocks(self, TIMEs, TIMEp, **kwargs):
+        """Add scheduling and planning block to model."""
+        stn = self.stn
+        m = self.model
+        m.sb = pyomo.Block()
+        self.sb = blockScheduling(stn, TIMEs,
+                                  self.Demand, **kwargs)
+        self.sb.define_block(m.sb, **kwargs)
+        m.pb = pyomo.Block()
+        self.pb = blockPlanning(stn, TIMEp,
+                                self.Demand, **kwargs)
+        self.pb.define_block(m.pb, **kwargs)
 
     def add_unit_constraints(self):
         """Add unit allocation continuity constraints to model."""
@@ -108,6 +239,7 @@ class stnModel(object):
             m.cons.add(m.pb.Rtransfer[j] == m.sb.R[j, self.sb.T - self.sb.dT])
 
     def add_objective(self):
+        """Add objective function."""
         m = self.model
         stn = self.stn
         totslack = 0
@@ -118,24 +250,24 @@ class stnModel(object):
             for t in m.pb.TIME:
                 totslack += m.pb.Dslack[s, t]
         m.cons.add(m.TotSlack == totslack)
-        m.Obj = pyomo.Objective(expr=m.sb.Cost
-                                + m.pb.Cost
-                                + m.TotSlack*10000,
+        m.Obj = pyomo.Objective(expr=m.sb.Cost          # cost scheduling blk
+                                + m.pb.Cost             # cost planning blk
+                                + m.TotSlack*10000,     # penalize slack vars
                                 sense=pyomo.minimize)
 
-    def add_blocks(self, TIMEs, TIMEp, **kwargs):
-        stn = self.stn
-        m = self.model
-        m.sb = pyomo.Block()
-        self.sb = blockScheduling(stn, TIMEs,
-                                  self.Demand, **kwargs)
-        self.sb.define_block(m.sb, **kwargs)
-        m.pb = pyomo.Block()
-        self.pb = blockPlanning(stn, TIMEp,
-                                self.Demand, **kwargs)
-        self.pb.define_block(m.pb, **kwargs)
+    def demand(self, state, time, Demand):
+        """Add demand to model."""
+        self.Demand[state, time] = Demand
+
+    def uncertainty(self, alpha):
+        """Set uncertainty set size parameter."""
+        self.alpha = alpha
 
     def transfer_next_period(self, **kwargs):
+        """
+        Transfer results from previous scheduling period to next (rolling
+        horizon).
+        """
         m = self.model
         stn = self.stn
 
@@ -154,120 +286,11 @@ class stnModel(object):
                         stn.tauinit[j] = 0
             stn.Rinit[j] = m.sb.R[j, self.sb.T - self.sb.dT]()
 
-    def build(self, T_list, objective="biondi", period=None, **kwargs):
-        """Build STN model."""
-        assert period is not None
-        self.model = pyomo.ConcreteModel()
-        m = self.model
-        stn = self.stn
-        m.cons = pyomo.ConstraintList()
-        m.ptransfer = pyomo.Var(stn.tasks, stn.units, stn.opmodes,
-                                domain=pyomo.NonNegativeReals)
-        m.Btransfer = pyomo.Var(stn.tasks, stn.units, stn.opmodes,
-                                domain=pyomo.NonNegativeReals)
-        m.tautransfer = pyomo.Var(stn.units, domain=pyomo.NonNegativeReals)
-        m.Dslack = pyomo.Var(stn.states, domain=pyomo.NonNegativeReals)
-        m.TotSlack = pyomo.Var(domain=pyomo.NonNegativeReals)
-
-        # scheduling and planning block
-        Ts = T_list[0]
-        dTs = T_list[1]
-        Tp = T_list[2]
-        dTp = T_list[3]
-        Ts_start = period * Ts
-        Tp_start = (period + 1) * Ts
-        Ts = Ts_start + Ts
-        Tp = Ts_start + Tp
-        self.add_blocks([Ts_start, Ts, dTs], [Tp_start, Tp, dTp], **kwargs)
-
-        # add continuity constraints to model
-        self.add_unit_constraints()
-        self.add_state_constraints()
-        self.add_deg_constraints(**kwargs)
-
-        # add objective function to model
-        self.add_objective()
-
-    def solve(self, T_list, periods=1, solver='cplex', prefix='',
-              rdir='results', solverparams=None,
-              save=False, trace=False, gantt=True, **kwargs):
-        """
-        Solves the model
-
-            T_list: []
-            periods: number of rolling horizon periods
-            solver: specifies which solver to use
-            prefix: added to all file names
-            rdir: directory for result files
-            solverparams: dictionary of solver parameters
-            save: save results as .pyomo?
-            trace: generate trace?
-            gantt: generate gantt graphs?
-
-        """
-        # Initialize solver and set parameters
-        self.solver = pyomo.SolverFactory(solver)
-        if solverparams is not None:
-            for key, value in solverparams.items():
-                self.solver.options[key] = value
-        prefix_old = prefix
-
-        # Rolling horizon
-        for period in range(0, periods):
-            if periods > 1:
-                prefix = prefix_old + "_" + str(period)
-            # Build model
-            self.build(T_list, period=period, **kwargs)
-            logfile = rdir + "/" + prefix + "STN.log"
-            # Solve model
-            results = self.solver.solve(self.model,
-                                        tee=True,
-                                        keepfiles=True,
-                                        symbolic_solver_labels=True,
-                                        logfile=logfile)
-            results.write()
-            # Check if solver exited normally
-            if ((results.solver.status == SolverStatus.ok) and
-                (results.solver.termination_condition ==
-                 TerminationCondition.optimal or
-                 results.solver.termination_condition ==
-                 TerminationCondition.maxTimeLimit)):
-                # Calculate MIP Gap
-                obj = self.model.Obj()
-                gap = self.solver._gap
-                self.gapmin = min(self.gapmin,
-                                  gap/obj*100)
-                self.gapmax = max(self.gapmax,
-                                  gap/obj*100)
-                self.gapmean = (self.gapmean
-                                * period/(period+1)
-                                + (1 - period/(period + 1))
-                                * gap/obj*100)
-                # Save results
-                if save:
-                    with open(rdir+"/"+prefix+'output.txt', 'w') as f:
-                        f.write("STN Output:")
-                        self.model.display(ostream=f)
-                    with open(rdir+"/"+prefix+'STN.pyomo', 'wb') as dill_file:
-                        dill.dump(self.model, dill_file)
-                if gantt:
-                    self.sb.gantt(prefix=prefix, rdir=rdir)
-                    self.pb.gantt(prefix=prefix, rdir=rdir)
-                if trace:
-                    self.sb.trace(prefix=prefix, rdir=rdir)
-                    self.pb.trace(prefix=prefix, rdir=rdir)
-                if periods > 1:
-                    self.transfer_next_period(**kwargs)
-                # Add current model to list
-                self.m_list.append(self.model)
-            else:
-                break
-
     def loadres(self, f="STN.pyomo"):
         with open(f, 'rb') as dill_file:
             self.model = dill.load(dill_file)
 
-    def resolve(self, solver='cplex', prefix=''):  # FIX: self -> stn
+    def resolve(self, solver='cplex', prefix=''):  # TODO: fix this
         for j in self.units:
             for t in self.sb.TIME:
                 for i in self.I[j]:
@@ -296,7 +319,7 @@ class stnModel(object):
         with open("results/r"+prefix+'STN.pyomo', 'wb') as dill_file:
             dill.dump(self.model, dill_file)
 
-    def reevaluate(self, prefix):  # FIX: self -> stn
+    def reevaluate(self, prefix):  # TODO: fix this
         m = self.model
 
         # Recalculate F and R
@@ -357,6 +380,10 @@ class stnModel(object):
 
     def get_gap(self):
         return self.gapmax, self.gapmean, self.gapmin
+
+    def calc_p_fail(self, unit, TP="../data/TP.pkl", periods=0):
+        return calc_p_fail(self, unit, self.alpha, TP, pb=True,
+                           periods=periods)
 
     def check_for_task(self, model, j, t):
         b = model.sb
@@ -425,31 +452,25 @@ class stnModel(object):
 
 
 class stnModelRobust(stnModel):
+    """Robust model for STN."""
     def __init__(self, stn=None):
         super().__init__(stn)
 
-    def build(self, T_list, objective="biondi", period=None, tindexed=True,
-              **kwargs):
+    def build(self, T_list, period=None, tindexed=True,
+              alpha=0.5, **kwargs):
         assert period is not None
-        super().build(T_list, objective=objective, period=period,
-                      tindexed=tindexed, **kwargs)
-
-    def add_deg_constraints(self, tindexed=None, **kwargs):
-        assert tindexed is not None
+        self.alpha = alpha
         stn = self.stn
-        m = self.model
         for j in stn.units:
-            m.cons.add(m.pb.R0transfer[j] == m.sb.R0[j, self.sb.T -
-                                                     self.sb.dT])
             for i in stn.I[j]:
                 for k in stn.O[j]:
-                    rhs = 0
-                    if tindexed:
-                        for t in self.sb.TIME:
-                            rhs += m.sb.Rc[j, self.sb.T - self.sb.dT, i, k, t]
-                    else:
-                        rhs += m.sb.Rc[j, self.sb.T - self.sb.dT, i, k]
-                    m.cons.add(m.pb.Rctransfer[j, i, k] == rhs)
+                    tm = i + "-" + k
+                    p = stn.p[i, j, k]
+                    D = stn.D[i, j, k]
+                    stn.eps[i, j, k] = 1 - stn.deg[j].get_quantile(alpha, tm,
+                                                                   p)/D
+        super().build(T_list, period=period,
+                      tindexed=tindexed, **kwargs)
 
     def add_blocks(self, TIMEs, TIMEp, decisionrule="continuous", **kwargs):
         stn = self.stn
@@ -475,6 +496,23 @@ class stnModelRobust(stnModel):
                                       **kwargs)
         self.pb.define_block(m.pb, decisionrule=decisionrule, **kwargs)
 
+    def add_deg_constraints(self, tindexed=None, **kwargs):
+        assert tindexed is not None
+        stn = self.stn
+        m = self.model
+        for j in stn.units:
+            m.cons.add(m.pb.R0transfer[j] == m.sb.R0[j, self.sb.T -
+                                                     self.sb.dT])
+            for i in stn.I[j]:
+                for k in stn.O[j]:
+                    rhs = 0
+                    if tindexed:
+                        for t in self.sb.TIME:
+                            rhs += m.sb.Rc[j, self.sb.T - self.sb.dT, i, k, t]
+                    else:
+                        rhs += m.sb.Rc[j, self.sb.T - self.sb.dT, i, k]
+                    m.cons.add(m.pb.Rctransfer[j, i, k] == rhs)
+
     def transfer_next_period(self, deg_continuity="max", **kwargs):
         """ Transfer results from end of current scheduling period. """
         stn = self.stn
@@ -495,8 +533,8 @@ class stnStruct(object):
 
         # constants
         self.U = 100                # big U
-        self.eps = 0.0              # Maximum deviation for uncertain D's FIX!
-        self.alpha = 0.5            # uncertainty set size parameter
+        # self.eps = 0.0            # Maximum deviation for uncertain D's FIX!
+        # self.alpha = 0.5            # uncertainty set size parameter
 
         # dictionaries indexed by task name
         self.S = {}                 # sets of states feeding each task (inputs)
@@ -519,6 +557,7 @@ class stnStruct(object):
         self.a = {}                 # fixed maintenance cost for each unit
         self.b = {}                 # maintenance discount for each unit
         self.tauinit = {}           # initial time of maintenance left
+        self.deg = {}               # degradation models
 
         # dictionaries indexed by (task, state)
         self.rho = {}               # input feed fractions
@@ -532,6 +571,7 @@ class stnStruct(object):
         self.vcost = {}
         self.Rmax = {}
         self.Rinit = {}
+        self.eps = {}
 
         # characterization of units indexed by (task, unit, operating mode)
         self.p = {}                 # task duration
@@ -541,6 +581,9 @@ class stnStruct(object):
 
         # dictionaries indexed by (task,task)
         self.changeoverTime = {}    # time required for task1 -> task2
+
+        # dictionaries indexed by operating mode
+        self.modeorder = {}
 
     # defines states as .state(name, capacity, init)
     def state(self, name, capacity=float('inf'), init=0, price=0, scost=0):
@@ -577,7 +620,6 @@ class stnStruct(object):
         self.T_[state].add(task)
         self.rho_[(task, state)] = rho
         self.P[(task, state)] = dur
-#        self.p[task] = max(self.p[task],dur)
 
     def unit(self, unit, task, Bmin=0, Bmax=float('inf'), cost=0, vcost=0,
              tm=0, rmax=0, rinit=0, a=0, b=0, tauinit=0):
@@ -590,6 +632,7 @@ class stnStruct(object):
             self.Rinit[unit] = 0
             self.a[unit] = 0
             self.b[unit] = 0
+            self.deg[unit] = degradationModel(unit)
         if task not in self.tasks:
             self.task(task)
         self.I[unit].add(task)
@@ -608,15 +651,19 @@ class stnStruct(object):
     def opmode(self, opmode):
         if opmode not in self.opmodes:
             self.opmodes.add(opmode)
+            self.modeorder[opmode] = max([-1] + [i for i in
+                                                 self.modeorder.values()]) + 1
 
     def ijkdata(self, task, unit, opmode,
-                dur=1, wear=0, pinit=0, Binit=0, sd=0):
+                dur=1, wear=0, sd=0, pinit=0, Binit=0):
         if opmode not in self.O[unit]:
             self.O[unit].add(opmode)
         self.p[task, unit, opmode] = dur
         self.D[task, unit, opmode] = wear
         self.pinit[task, unit, opmode] = pinit
         self.Binit[task, unit, opmode] = Binit
+        self.deg[unit].set_op_mode(task + "-" + opmode, wear/dur,
+                                   sd/np.sqrt(dur))
 
     def changeover(self, task1, task2, dur):
         self.changeoverTime[(task1, task2)] = dur

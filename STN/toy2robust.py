@@ -30,7 +30,7 @@ import deg # noqa
 # create instance
 rdir = "/home/jw3617/STN/results"
 Q = np.arange(0.01, 0.51, 0.01)
-# Q = [0.23920924126]
+Q = [0.0]
 cols = ["ID", "alpha", "epsilon", "Pheater", "Preactor", "CostStorage",
         "CostMaintenance", "Cost", "Cost0", "Dslack", "timeTotal",
         "infeasible", "demand1", "demand2"]

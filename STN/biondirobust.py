@@ -52,7 +52,7 @@ for n, q in enumerate(Q):
     rid += 1
     t = time.time()
     model = stnModelRobust()
-    with open("biondiRstruct.dat", "rb") as dill_file:
+    with open("biondiR.dat", "rb") as dill_file:
         stn = dill.load(dill_file)
 
     model.stn = stn
@@ -75,9 +75,11 @@ for n, q in enumerate(Q):
         model.demand('Product_2', TIMEp[i], demand_2[i])
 
     eps = 1 - sct.norm.ppf(q=q, loc=1, scale=0.27)
-    model.uncertainty(eps)
+    print(eps)
+    model.uncertainty(q)
     solverparams = {"timelimit": 600,
                     "mipgap": 0.02}
+    import ipdb; ipdb.set_trace()  # noqa
     model.solve([Ts, dTs, Tp, dTp],
                 solver="cplex",
                 objective="terminal",
@@ -93,14 +95,14 @@ for n, q in enumerate(Q):
     # preactor2 = deg.simulate_deg(100000, model, "Reactor_2", Sinit=40, dt=3)
     # pheater = deg.simulate_deg(100000, model, "Heater", Sinit=50, dt=3)
     # pstill = deg.simulate_deg(100000, model, "Still", Sinit=60, dt=3)
-    pr1 = deg.simulate_deg_pb(1000, 100, model, "Reactor_1", eps, pb=True,
-                              periods=12)
-    pr2 = deg.simulate_deg_pb(1000, 100, model, "Reactor_2", eps, pb=True,
-                              periods=12)
-    ph = deg.simulate_deg_pb(1000, 100, model, "Heater", eps, pb=True,
-                             periods=12)
-    ps = deg.simulate_deg_pb(1000, 100, model, "Still", eps, pb=True,
-                             periods=12)
+    pr1 = deg.calc_p_fail(model, "Reactor_1", q, "../data/TP.pkl", pb=True,
+                          periods=12)
+    pr2 = deg.calc_p_fail(model, "Reactor_2", q, "../data/TP.pkl", pb=True,
+                          periods=12)
+    ph = deg.calc_p_fail(model, "Heater", q, "../data/TP.pkl", pb=True,
+                         periods=12)
+    ps = deg.calc_p_fail(model, "Still", q, "../data/TP.pkl", pb=True,
+                         periods=12)
     pdfloc = pd.DataFrame(np.transpose(np.array([pr1, pr2, ph, ps])),
                           columns=["Reactor_1", "Reactor_2",
                                    "Heater", "Still"])
