@@ -15,7 +15,7 @@ from blocks import blockScheduling # noqa
 
 # create instance
 
-with open("../data/biondiR.dat", "rb") as dill_file:
+with open("../data/biondi.dat", "rb") as dill_file:
     stn = dill.load(dill_file)
 
 N = 200
@@ -51,7 +51,7 @@ try:
 except IOError:
     dfp2 = dfp
 
-N = 1
+# N = 1
 for i in range(0, N):
     rid += 1
     t = time.time()
@@ -61,7 +61,7 @@ for i in range(0, N):
     model.build()
     # model.uncertainty(0.1)
     solverparams = {
-                    "timelimit": 30,
+                    "timelimit": 600,
                     # "dettimelimit": 72000
                     "mipgap": 0.02,
                     # "mip_strategy_heuristicfreq": 30

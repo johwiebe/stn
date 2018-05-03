@@ -91,5 +91,3 @@ model.solve([Ts, dTs, Tp, dTp],
             save=True,
             trace=True,
             tindexed=False)
-ph = model.calc_p_fail("Heater")
-import ipdb; ipdb.set_trace()  # noqa

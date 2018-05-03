@@ -18,6 +18,7 @@ import seaborn as sns
 import dill
 import sys
 import matplotlib.pyplot as plt
+from deg import calc_p_fail
 
 
 class stnBlock(object):
@@ -35,18 +36,30 @@ class stnBlock(object):
         TIME = range(T_list[0], self.T, self.dT)
         self.TIME = np.array(TIME)
         self.Demand = Demand
+        self.alpha = 0.5
 
     def demand(self, state, time, Demand):
         """Set demand for state at time."""
         self.Demand[state, time] = Demand
 
-    def build(self, **kwargs):
+    def build(self, alpha=0.5, **kwargs):
         """
         Initializes and builds model. Only call this if block is
         used individually.
         """
         self.model = pyomo.ConcreteModel()
         m = self.model
+        stn = self.stn
+        if alpha != self.alpha:
+            for j in stn.units:
+                for i in stn.I[j]:
+                    for k in stn.O[j]:
+                        tm = i + "-" + k
+                        p = stn.p[i, j, k]
+                        D = stn.deg[j].get_mu(tm, p)
+                        eps = stn.deg[j].get_eps(alpha, tm, p)
+                        stn.D[i, j, k] = D*(1 + eps)
+            self.alpha = alpha
         self.define_block(m, **kwargs)
         # Add objective to model
         m.Obj = pyomo.Objective(expr=m.Cost,
@@ -88,6 +101,11 @@ class stnBlock(object):
             self.inf = True
         else:
             self.inf = False
+
+    def loadres(self, f="STN.pyomo"):
+        with open(f, 'rb') as dill_file:
+            self.model = dill.load(dill_file)
+            self.b = self.model
 
     def define_block(self, b, **kwargs):
         """Add variables, constraints, and objective function to model."""
@@ -213,9 +231,9 @@ class blockScheduling(stnBlock):
             for t in self.TIME:
                 # constraints on F[j,t] and R[j,t]
                 # TODO: these are obsolete?
-                # b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
-                # b.cons.add(b.F[j, t] <= stn.Rmax[j] - rhs)
-                # b.cons.add(b.F[j, t] >= stn.Rmax[j]*b.M[j, t] - rhs)
+                b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+                b.cons.add(b.F[j, t] <= stn.Rmax[j] - rhs)
+                b.cons.add(b.F[j, t] >= stn.Rmax[j]*b.M[j, t] - rhs)
                 b.cons.add(0 <= b.R[j, t])
                 b.cons.add(b.R[j, t] <= stn.Rmax[j]*(1 - b.M[j, t]))
                 # residual life balance
@@ -240,17 +258,29 @@ class blockScheduling(stnBlock):
         b.cons.add(b.CostStorage == costStorage)
 
         costMaintenance = 0
+        costMaintenanceEarly = 0
         for j in stn.units:
             for t in self.TIME:
                 costMaintenance += ((stn.a[j] - stn.b[j])
                                     * b.M[j, t])
+                if objective == "biondi":
+                    costMaintenanceEarly += (stn.b[j]
+                                             * (b.M[j, t]
+                                                - b.F[j, t]
+                                                / stn.Rmax[j]))
         b.cons.add(b.CostMaintenance == costMaintenance)
+        b.cons.add(b.CostMaintenanceEarly == costMaintenanceEarly)
         costWear = 0
         if objective == "biondi":
             costWear += self.calc_cost_wear()
+            b.cons.add(b.Cost == b.CostStorage + b.CostMaintenance +
+                       + b.CostWear + b.CostMaintenanceEarly)
+        elif objective == "terminal":
+            b.cons.add(b.Cost == b.CostStorage + b.CostMaintenance +
+                       b.CostMaintenanceFinal)
+        else:
+            raise KeyError("KeyError: unknown objective %s" % objective)
         b.cons.add(b.CostWear == costWear)
-        b.cons.add(b.Cost == b.CostStorage + b.CostMaintenance +
-                   b.CostMaintenanceFinal + b.CostWear)
 
     def calc_cost_wear(self):
         """Calculate wear penalty (Biondi)."""
@@ -286,30 +316,15 @@ class blockScheduling(stnBlock):
             b.cons.add(b.Sfin[s] == rhs)
             b.cons.add(0 <= b.Sfin[s] <= stn.C[s])
 
-    def build(self, objective="terminal", alpha=0.5, **kwargs):
+    def build(self, objective="terminal", **kwargs):
         """Only use when block is solved individually."""
-        # replace D by Dmax if alpha != 0.5
         stn = self.stn
-        if alpha != 0.5:
-            for j in stn.units:
-                for i in stn.I[j]:
-                    for k in stn.O[j]:
-                        tm = i + "-" + k
-                        D = stn.D[i, j, k]
-                        p = stn.p[i, j, k]
-                        X = stn.deg[j].get_quantile(alpha, tm, p)
-                        stn.D[i, j, k] = 2*D - X
         super().build(objective=objective, **kwargs)
         b = self.b
-        if objective == "terminal":
-            # calculate terminal maint cost
-            self.calc_cost_maintenance_terminal()
-        elif objective == "biondi":
-            b.cons.add(b.CostMaintenanceFinal == 0)
-        else:
-            raise KeyError("KeyError: unknown objective %s" % objective)
-
-        self.add_demand_constraint()            # add demand constraint
+        # calculate terminal maint cost
+        self.calc_cost_maintenance_terminal()
+        # add demand constraint
+        self.add_demand_constraint()
         # add slack for unfullfilled demand
         for s in stn.states:
             for t in self.TIME:
@@ -354,6 +369,7 @@ class blockScheduling(stnBlock):
         b.CostStorage = pyomo.Var(domain=pyomo.NonNegativeReals)
         b.CostMaintenance = pyomo.Var(domain=pyomo.NonNegativeReals)
         b.CostMaintenanceFinal = pyomo.Var(domain=pyomo.NonNegativeReals)
+        b.CostMaintenanceEarly = pyomo.Var(domain=pyomo.NonNegativeReals)
         b.CostWear = pyomo.Var(domain=pyomo.NonNegativeReals)
         b.Cost = pyomo.Var(domain=pyomo.NonNegativeReals)
         # slack for unfulfilled demand
@@ -370,6 +386,17 @@ class blockScheduling(stnBlock):
                            / stn.Rmax[j])
                           * (stn.a[j] - stn.b[j]))
         b.cons.add(b.CostMaintenanceFinal == costFinal)
+
+    def get_cost_maintenance_terminal(self):
+        """Calculate terminal cost of maintenance."""
+        stn = self.stn
+        b = self.b
+        costFinal = 0
+        for j in stn.units:
+            costFinal += ((b.R[j, self.T - self.dT]()
+                           / stn.Rmax[j])
+                          * (stn.a[j] - stn.b[j]))
+        return costFinal
 
     def check_for_task(self, j, t):
         """Check if task is being performed on unit j at time t."""
@@ -426,7 +453,7 @@ class blockScheduling(stnBlock):
         b = self.b
         stn = self.stn
 
-        gap = self.T/400
+        gap = (self.T - self.TIME[0])/400
         idx = 1
         lbls = []
         ticks = []
@@ -469,9 +496,20 @@ class blockScheduling(stnBlock):
                                  [idx, idx], lw=24,
                                  alpha=.3, color='y')
                         lbls.append("{0:s} -> {1:s}".format(j, i))
+                        for k in stn.O[j]:
+                            if stn.pinit[i, j, k] > self.dT/2:
+                                plt.plot([t, t+stn.pinit[i, j, k]],
+                                         [idx, idx], 'k',  lw=24,
+                                         alpha=0.5, solid_capstyle='butt')
+                                plt.plot([t+gap, t+stn.pinit[i, j, k]-gap],
+                                         [idx, idx], color=mode_col[k], lw=20,
+                                         solid_capstyle='butt')
+                                txt = "{0:.2f}".format(stn.Binit[i, j, k])
+                                plt.text(t+stn.pinit[i, j, k]/2, idx,  txt,
+                                         weight='bold', ha='center',
+                                         va='center')
                     for k in stn.O[j]:
                         if b.W[i, j, k, t]() > 0.5:
-                            # TODO: shouldn't be explicit
                             plt.plot([t, t+stn.p[i, j, k]],
                                      [idx, idx], 'k',  lw=24,
                                      alpha=0.5, solid_capstyle='butt')
@@ -605,18 +643,8 @@ class blockSchedulingRobust(blockScheduling):
     def __init__(self, stn, TIME, Demand={}, **kwargs):
         super().__init__(stn, TIME, Demand, **kwargs)
 
-    def build(self, decisionrule="continuous", tindexed=False, alpha=0.5,
+    def build(self, decisionrule="continuous", tindexed=False,
               **kwargs):
-        self.alpha = alpha
-        stn = self.stn
-        for j in stn.units:
-            for i in stn.I[j]:
-                for k in stn.O[j]:
-                    tm = i + "-" + k
-                    p = stn.p[i, j, k]
-                    D = stn.D[i, j, k]
-                    stn.eps[i, j, k] = 1 - stn.deg[j].get_quantile(alpha,
-                                                                   tm, p)/D
         super().build(decisionrule=decisionrule, tindexed=tindexed, **kwargs)
 
     def calc_nominal_R(self, tindexed=None, **kwargs):
@@ -678,17 +706,17 @@ class blockSchedulingRobust(blockScheduling):
                          stn.opmodes, self.TIME,
                          domain=pyomo.NonNegativeReals)
 
-    def calc_cost_maintenance_terminal(self):
-        """Calculate terminal cost of maintenance (robust)."""
-        b = self.b
-        stn = self.stn
+    # def calc_cost_maintenance_terminal(self):
+    #     """Calculate terminal cost of maintenance (robust)."""
+    #     b = self.b
+    #     stn = self.stn
 
-        costFinal = 0
-        for j in stn.units:
-            costFinal += ((b.Rmax[j, self.T - self.dT]
-                           / stn.Rmax[j])
-                          * (stn.a[j] - stn.b[j]))
-        b.cons.add(b.CostMaintenanceFinal == costFinal)
+    #     costFinal = 0
+    #     for j in stn.units:
+    #         costFinal += ((b.Rmax[j, self.T - self.dT]
+    #                        / stn.Rmax[j])
+    #                       * (stn.a[j] - stn.b[j]))
+    #     b.cons.add(b.CostMaintenanceFinal == costFinal)
 
     def add_vars_not_tindexed(self, domain):
         b = self.b
@@ -887,9 +915,9 @@ class blockSchedulingRobust(blockScheduling):
             # RcLast = stn.Rinit[j]
             for t in self.TIME:
                 # constraints on F[j,t] and R[j,t]
-                b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
-                b.cons.add(b.F[j, t] <= stn.Rmax[j] - b.R[j, t])
-                b.cons.add(b.F[j, t] >= stn.Rmax[j]*b.M[j, t] - b.R[j, t])
+                # b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+                # b.cons.add(b.F[j, t] <= stn.Rmax[j] - b.R[j, t])
+                # b.cons.add(b.F[j, t] >= stn.Rmax[j]*b.M[j, t] - b.R[j, t])
                 b.cons.add(b.R[j, t] <= stn.Rmax[j])
                 # b.cons.add(stn.Rmax[j]*b.M[j, t] <= b.R[j, t])
                 # residual life balance
@@ -1092,19 +1120,10 @@ class blockPlanning(stnBlock):
                 b.cons.add(b.R[j, t] <= rhs)
                 rhs = b.R[j, t]
 
-    def build(self, objective="terminal", alpha=0.5, **kwargs):
+    def build(self, objective="terminal", **kwargs):
         """ Only used if block is solved individually."""
         # replace D by Dmax if alpha != 0.5
         stn = self.stn
-        if alpha != 0.5:
-            for j in stn.units:
-                for i in stn.I[j]:
-                    for k in stn.O[j]:
-                        tm = i + "-" + k
-                        D = stn.D[i, j, k]
-                        p = stn.p[i, j, k]
-                        X = stn.deg[j].get_quantile(alpha, tm, p)
-                        stn.D[i, j, k] = 2*D - X
         super().build(objective=objective, **kwargs)
         # set intial values
         self.set_initial_values()
@@ -1242,6 +1261,39 @@ class blockPlanning(stnBlock):
             b.cons.add(b.Ntransfer[j] == 0)
             b.cons.add(b.Rtransfer[j] == stn.Rinit[j])
 
+    def get_production_targets(self):
+        b = self.b
+        stn = self.stn
+        cols = ["time"]
+        prods = stn.products
+        for p in prods:
+            cols.append(p)
+        df = pd.DataFrame(columns=cols)
+        for t in self.TIME:
+            target = []
+            for p in prods:
+                rhs = 0
+                for i in stn.T_[p]:
+                    for j in stn.K[i]:
+                        rhs += stn.rho_[(i, p)]*b.A[i, j, t]()
+                target.append(rhs)
+            line = [t] + target
+            df = df.append(pd.Series(line, index=cols),
+                           ignore_index=True)
+        return df
+
+    def calc_p_fail(self, units=None, TP=None, periods=0, **kwargs):
+        assert TP is not None
+        if units is None:
+            units = self.stn.units
+        elif type(units) == str:
+            units = set([units])
+        df = pd.DataFrame(columns=units)
+        for j in units:
+            df[j] = calc_p_fail(self, j, self.alpha, TP, pb=True,
+                                periods=periods, **kwargs)
+        return df
+
     def gantt(self, prefix='', rdir=None):
         """
         Generate gantt graph.
@@ -1259,7 +1311,8 @@ class blockPlanning(stnBlock):
         # TODO: This is stupid!
         task_palette = sns.color_palette("Set2", len(stn.tasks))
         task_col = {}
-        for task in stn.tasks:
+        tsorted = sorted(stn.tasks)
+        for task in tsorted:
             task_col.update({task: task_palette.pop()})
         mode_palette = sns.color_palette("YlOrRd", len(stn.opmodes))
         mode_col = {}
@@ -1316,6 +1369,7 @@ class blockPlanning(stnBlock):
         plt.gca().set_xticks(self.TIME)
         plt.gca().set_xticklabels(np.round(100*self.TIME/168)/100)
         plt.savefig(rdir+"/"+prefix+'gantt_planning.png')
+        plt.close('all')
 
     def trace(self, prefix='', rdir=None):
         """
@@ -1388,18 +1442,8 @@ class blockPlanningRobust(blockPlanning):
     def __init__(self, stn, TIME, Demand, **kwargs):
         super().__init__(stn, TIME, Demand, **kwargs)
 
-    def build(self, decisionrule="continuous", tindexed=False, alpha=0.5,
+    def build(self, decisionrule="continuous", tindexed=False,
               **kwargs):
-        self.alpha = alpha
-        stn = self.stn
-        for j in stn.units:
-            for i in stn.I[j]:
-                for k in stn.O[j]:
-                    tm = i + "-" + k
-                    p = stn.p[i, j, k]
-                    D = stn.D[i, j, k]
-                    stn.eps[i, j, k] = 1 - stn.deg[j].get_quantile(alpha,
-                                                                   tm, p)/D
         super().build(decisionrule=decisionrule, tindexed=tindexed, **kwargs)
 
     def calc_nominal_R(self, tindexed=None, **kwargs):
@@ -1661,7 +1705,7 @@ class blockPlanningRobust(blockPlanning):
             for t in self.TIME:
                 # constraints on R and F
                 b.cons.add(0 <= b.R[j, t] <= stn.Rmax[j])
-                b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
+                # b.cons.add(b.F[j, t] <= stn.Rmax[j]*b.M[j, t])
 
                 # inequality 1
                 lhs = 0

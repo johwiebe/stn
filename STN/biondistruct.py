@@ -22,8 +22,8 @@ stn.state('HotA',      price=-1, capacity=100, scost=1)
 stn.state('IntAB',     price=-1, capacity=200, scost=1)
 stn.state('IntBC',     price=-1, capacity=150, scost=1)
 stn.state('ImpureE',   price=-1, capacity=100, scost=1)
-stn.state('Product_1', price=10, scost=5)
-stn.state('Product_2', price=10, scost=5)
+stn.state('Product_1', price=10, scost=5, prod=True)
+stn.state('Product_2', price=10, scost=5, prod=True)
 
 # state to task arcs
 stn.stArc('FeedA',   'Heating')
@@ -47,20 +47,20 @@ stn.tsArc('Separation', 'Product_2', rho=0.9)
 # unit-task data
 stn.unit('Heater',    'Heating',    Bmin=40, Bmax=100, tm=15, rmax=80,
          rinit=50, a=600, b=300)
-         # rinit=30, a=600, b=300)
+         # rinit=50, a=1000, b=500)
 stn.unit('Reactor_1', 'Reaction_1', Bmin=32, Bmax=80, tm=21, rmax=150,
          rinit=100, a=1500, b=600)
-         # rinit=50, a=1500, b=600)
+         # rinit=100, a=1000, b=500)
 stn.unit('Reactor_1', 'Reaction_2', Bmin=32, Bmax=80, tm=21)
 stn.unit('Reactor_1', 'Reaction_3', Bmin=32, Bmax=80, tm=21)
 stn.unit('Reactor_2', 'Reaction_1', Bmin=20, Bmax=50, tm=24, rmax=160,
          rinit=40, a=2500, b=500)
-         # rinit=120, a=2500, b=500)
+         # rinit=40, a=1000, b=500)
 stn.unit('Reactor_2', 'Reaction_2', Bmin=20, Bmax=50, tm=24)
 stn.unit('Reactor_2', 'Reaction_3', Bmin=20, Bmax=50, tm=24)
 stn.unit('Still',     'Separation', Bmin=80, Bmax=200, tm=15, rmax=100,
          rinit=60, a=2700, b=1500)
-         # rinit=40, a=2700, b=1500)
+         # rinit=60, a=1000, b=500)
 
 stn.opmode('Slow')
 stn.opmode('Normal')
@@ -91,5 +91,5 @@ stn.ijkdata('Separation', 'Still', 'Slow', 15, 2, 0.27*2)
 stn.ijkdata('Separation', 'Still', 'Normal', 9, 5, 0.27*5)
 stn.ijkdata('Separation', 'Still', 'Fast', 6, 6, 0.27*6)
 
-with open("biondiR.dat", "wb") as dill_file:
+with open("../data/biondiM.dat", "wb") as dill_file:
     dill.dump(stn, dill_file)

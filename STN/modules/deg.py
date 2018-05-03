@@ -9,6 +9,7 @@ import time
 import dill
 from joblib import Parallel, delayed
 import scipy.stats as sct
+from math import floor
 
 
 class degradationModel(object):
@@ -47,9 +48,14 @@ class degradationModel(object):
         sd = self.sd[k]*np.sqrt(dt)
         return mu, sd
 
+    def get_eps(self, alpha, k, dt=1):
+        mu = self.get_mu(k, dt=dt)
+        eps = 1 - self.get_quantile(alpha, k, dt=dt)/mu
+        return eps
+
 
 def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
-                periods=0, pb=True, *args, **kwargs):
+                periods=0, pb=True, dTs=3, *args, **kwargs):
     """
     Calculate probability of unit failure
         model: solved stn model
@@ -67,31 +73,39 @@ def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
     global stn, table
     stn = model.stn
     # get schedules from model scheduling horizon
-    df = model.get_unit_profile(j, full=False)
-    df["taskmode"] = df["task"] + "-" + df["mode"]
-    mc0 = list(df["taskmode"])
-    t0 = list(df["time"])[1:]
-    # length of final task in scheduling horizon
-    i = df.tail(1)["task"].iloc[0]
-    if i == "None":
-        t0.append(t0[-1] + model.sb.dT)
-    elif i == "M":
-        t0.append(t0[-1] + stn.tau[j])
+    if "get_unit_profile" in dir(model):
+        df = model.get_unit_profile(j, full=False)
+        df["taskmode"] = df["task"] + "-" + df["mode"]
+        mc0 = list(df["taskmode"])
+        t0 = list(df["time"])[1:]
+        # length of final task in scheduling horizon
+        i = df.tail(1)["task"].iloc[0]
+        if i == "None":
+            t0.append(t0[-1] + model.sb.dT)
+        elif i == "M":
+            t0.append(t0[-1] + stn.tau[j])
+        else:
+            k = df.tail(1)["mode"].iloc[0]
+            t0.append(t0[-1] + stn.p[i, j, k])
+        Sinit = model.model.sb.R[j, model.sb.T - model.sb.dT]()
+        dTp = model.pb.dT
+        dTs = model.sb.dT
     else:
-        k = df.tail(1)["mode"].iloc[0]
-        t0.append(t0[-1] + stn.p[i, j, k])
-    # load logistic regression model
+        mc0 = ["None-None"]
+        t0 = [dTs]
+        Sinit = stn.Rinit[j]
+        dTp = model.dT
+    #  load logistic regression model
     with open(TPfile, "rb") as dill_file:
         TP = dill.load(dill_file)
     # get production targets for planning horizon
     pdf = model.get_production_targets()
     if periods > 0:
-        pdf = pdf[(pdf["time"] <= periods*model.pb.dT) & (pdf["time"]
-                                                          > t0[-1])]
+        pdf = pdf[(pdf["time"] <= periods*dTp) & (pdf["time"]
+                                                  > t0[-1])]
     else:
         pdf = pdf[(pdf["time"] > t0[-1])]
-    prods = [p for p in pdf.columns[pdf.columns != "time"]]
-    prods = ["Product_1", "Product_2"]
+    prods = stn.products
     dem = []
     for p in prods:
         dem.append(np.array(pdf[p]))
@@ -101,13 +115,6 @@ def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
     mcslist = []
     tlist = []
     tslist = []
-    # TODO: Change definition of R to make them compatible?
-    # if "Robust" in type(model).__name__:
-    Sinit = model.model.sb.R[j, model.sb.T - model.sb.dT]()
-    # else:
-    #     Sinit = model.stn.Rmax[j] - model.model.sb.R[j,
-    #                                                  model.sb.T
-    #                                                  - model.sb.dT]()
     D = {"None-None": 0, "M-M": 0}
     # calculate all relavent transition probabilities once
     table = {}
@@ -115,8 +122,10 @@ def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
         for k in stn.O[j]:
             tm = i + "-" + k
             ptm = stn.p[i, j, k]
-            Dtm = stn.D[i, j, k]
-            eps = 1 - stn.deg[j].get_quantile(alpha, tm, ptm)/Dtm
+            # Dtm = stn.D[i, j, k]
+            # eps = 1 - stn.deg[j].get_quantile(alpha, tm, ptm)/Dtm
+            Dtm = stn.deg[j].get_mu(tm, ptm)
+            eps = stn.deg[j].get_eps(alpha, tm, ptm)
             D.update({tm: Dtm*(1+eps)})
     for tm in D.keys():
         logreg = TP[j, tm]
@@ -131,24 +140,27 @@ def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
     res = Parallel(n_jobs=Ncpus)(delayed(generate_seq_mc)(D,
                                                           j, "None-None",
                                                           t0[-1],
-                                                          model.sb.dT,
-                                                          model.pb.dT,
+                                                          dTs, dTp,
                                                           dem,
                                                           # eps,
                                                           Sinit=Sinit)
                                  for i in range(0, Nmc))
     # append generated sequences to scheduling horizon
+    # occ = []
     for n in range(0, Nmc):
         mc = mc0 + res[n][0]
+        # occ.append(sum(np.array(mc) == "Separation-Slow"))
         t = t0 + res[n][2]
         mcshort, tshort = get_short_mc(mc, t)
         mclist.append(mc)
         tlist.append(t)
         mcslist.append(mcshort)
         tslist.append(tshort)
+    # return occ
+    # print(occ)
     # estimate failure probabilities in parallel
     Smax = model.stn.Rmax[j]
-    Sinit = model.stn.Rinit[j]
+    Sinit = model.stn.Rinit0[j]
     # approach by Poetzelberger
     if pb:
         GL, LL = get_gradient(stn, j)
@@ -178,7 +190,6 @@ def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
         inflist = np.array(inflist)/N*100
 
     print("Time taken:" + str(time.time()-st) + ", Pfail:" + str(max(inflist)))
-
     return inflist
 
 
@@ -252,8 +263,9 @@ def sim_wiener_pb(mc, t, GL, LL, Nmcs=1000, Sinit=0, S0=0, Smax=0):
     J = 1
     # split sequence at maintenance tasks
     for mcg, tg in gen_group(mc, t, "M-M"):
-        J *= 1 - sim_wiener_group(mcg, tg, GL, LL, Nmcs, Sinit=Sinit,
-                                  Smax=Smax)
+        if len(mcg) > 0:
+            J *= 1 - sim_wiener_group(mcg, tg, GL, LL, Nmcs, Sinit=Sinit,
+                                      Smax=Smax)
         Sinit = S0
     return 1 - J
 
@@ -374,3 +386,11 @@ def get_deg_profile(profile, stn, j, dT, dt=1/10, N=1, Sinit=0, S0=0):
                               axis=1)
         t = tend
     return Darr
+
+
+def check_feasibility_lambda(lam, N, delta):
+    lhs = 1/(N+1)*floor((N+1)/N*((N-1)/lam**2 + 1))
+    if lhs <= delta:
+        return lam
+    else:
+        return 10000000

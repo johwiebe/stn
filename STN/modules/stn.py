@@ -105,7 +105,7 @@ class stnModel(object):
                 break
 
     def build(self, T_list, objective="terminal", period=None, alpha=0.5,
-              **kwargs):
+              extend=False, **kwargs):
         """Build STN model."""
         assert period is not None
         self.model = pyomo.ConcreteModel()
@@ -120,17 +120,19 @@ class stnModel(object):
         m.Dslack = pyomo.Var(stn.states, domain=pyomo.NonNegativeReals)
         m.TotSlack = pyomo.Var(domain=pyomo.NonNegativeReals)
 
-        # replace D by Dmax if alpha != 0.5
-        if alpha != 0.5:
-            self.alpha = alpha
+        # replace D by Dmax if alpha != self.alpha
+        if alpha != self.alpha:
             for j in stn.units:
                 for i in stn.I[j]:
                     for k in stn.O[j]:
                         tm = i + "-" + k
-                        D = stn.D[i, j, k]
                         p = stn.p[i, j, k]
-                        X = stn.deg[j].get_quantile(alpha, tm, p)
-                        stn.D[i, j, k] = 2*D - X
+                        D = stn.deg[j].get_mu(tm, p)
+                        eps = stn.deg[j].get_eps(alpha, tm, p)
+                        # X = stn.deg[j].get_quantile(alpha, tm, p)
+                        # stn.D[i, j, k] = 2*D - X
+                        stn.D[i, j, k] = D*(1 + eps)
+            self.alpha = alpha
 
         # scheduling and planning block
         Ts = T_list[0]
@@ -140,7 +142,8 @@ class stnModel(object):
         Ts_start = period * Ts
         Tp_start = (period + 1) * Ts
         Ts = Ts_start + Ts
-        Tp = Ts_start + Tp
+        if extend:
+            Tp = Ts_start + Tp
         self.add_blocks([Ts_start, Ts, dTs], [Tp_start, Tp, dTp],
                         objective=objective, **kwargs)
 
@@ -286,104 +289,33 @@ class stnModel(object):
                         stn.tauinit[j] = 0
             stn.Rinit[j] = m.sb.R[j, self.sb.T - self.sb.dT]()
 
-    def loadres(self, f="STN.pyomo"):
-        with open(f, 'rb') as dill_file:
-            self.model = dill.load(dill_file)
-
-    def resolve(self, solver='cplex', prefix=''):  # TODO: fix this
-        for j in self.units:
-            for t in self.sb.TIME:
-                for i in self.I[j]:
-                    for k in self.O[j]:
-                        self.model.sb.W[i, j, k, t].fixed = True
-                        self.model.sb.B[i, j, k, t].fixed = True
-                self.model.sb.M[j, t].fixed = True
-            for t in self.pb.TIME:
-                for i in self.I[j]:
-                    for k in self.O[j]:
-                        self.model.pb.N[i, j, k, t].fixed = True
-                        self.model.pb.A[i, j, t].fixed = True
-                        # self.model.pb.Mode[j,k,t].fixed = True
-                self.model.pb.M[j, t].fixed = True
-        self.model.preprocess()
-        self.solver = pyomo.SolverFactory(solver)
-        # results = self.solver.solve(self.model,tee=True,
-        #                             logfile="results/r"+prefix+"STN.log")
-        self.solver.options['dettimelimit'] = 500000
-        self.solver.solve(self.model,
-                          tee=True,
-                          logfile="results/r"+prefix+"STN.log").write()
-        with open("results/r"+prefix+'output.txt', 'w') as f:
-            f.write("STN Output:")
-            self.model.display(ostream=f)
-        with open("results/r"+prefix+'STN.pyomo', 'wb') as dill_file:
-            dill.dump(self.model, dill_file)
-
-    def reevaluate(self, prefix):  # TODO: fix this
-        m = self.model
-
-        # Recalculate F and R
-        constraintCheck = True
-        for j in self.units:
-            rhs = self.Rinit[j]
-            for t in self.sb.TIME:
-                # residual life balance
-                if m.sb.M[j, t]():
-                    m.sb.F[j, t] = self.Rmax[j] - rhs
-                    rhs = self.Rmax[j]
-                for i in self.I[j]:
-                    for k in self.O[j]:
-                        rhs -= self.D[i, j, k]*m.sb.W[i, j, k, t]()
-                m.sb.R[j, t] = max(rhs, 0)
-                if rhs < 0:
-                    constraintCheck = False
-            for t in self.pb.TIME:
-                # residual life balance
-                for i in self.I[j]:
-                    for k in self.O[j]:
-                        rhs -= self.D[i, j, k]*m.pb.N[i, j, k, t]()
-                if m.pb.M[j, t]():
-                    m.pb.F[j, t] = self.Rmax[j] - rhs
-                    rhs = self.Rmax[j]
-                m.pb.R[j, t] = max(rhs, 0)
-                if rhs < 0:
-                    constraintCheck = False
-        # Recalculate cost
-        costStorage = 0
-        for s in self.states:
-            costStorage += (self.scost[s]
-                            * (m.sb.Sfin[s]()
-                               + sum([m.pb.S[s, t]() for t in self.pb.TIME])))
-
-        costMaintenance = 0
-        costWear = 0
-        for j in self.units:
-            for t in self.sb.TIME:
-                costMaintenance += (self.a[j]*m.sb.M[j, t]()
-                                    - self.b[j]*m.sb.F[j, t]()/self.Rmax[j])
-                for i in self.I[j]:
-                    for k in self.O[j]:
-                        costWear += self.D[i, j, k]*m.sb.W[i, j, k, t]()
-            for t in self.pb.TIME:
-                costMaintenance += (self.a[j]*m.pb.M[j, t]()
-                                    - self.b[j]*m.pb.F[j, t]()/self.Rmax[j])
-                for i in self.I[j]:
-                    for k in self.O[j]:
-                        costWear += self.D[i, j, k]*m.pb.N[i, j, k, t]()
-        m.CostStorage = costStorage
-        m.CostMaintenance = costMaintenance
-        m.CostWear = costWear
-        return constraintCheck
-
-    def getD(self):
-        return self.D
+    def loadres(self, prefix="", f="STN.pyomo", periods=0):
+        if periods == 0:
+            with open(prefix + f, 'rb') as dill_file:
+                self.model = dill.load(dill_file)
+        else:
+            for period in range(0, periods):
+                with open(prefix + str(period) + f, 'rb') as dill_file:
+                    m = dill.load(dill_file)
+                    self.m_list.append(m)
+            self.model = m
+            self.sb.b = m.sb
+            self.pb.b = m.pb
 
     def get_gap(self):
         return self.gapmax, self.gapmean, self.gapmin
 
-    def calc_p_fail(self, unit, TP="../data/TP.pkl", periods=0):
-        return calc_p_fail(self, unit, self.alpha, TP, pb=True,
-                           periods=periods)
+    def calc_p_fail(self, units=None, TP=None, periods=0, pb=True):
+        assert TP is not None
+        if units is None:
+            units = self.stn.units
+        elif type(units) == str:
+            units = set([units])
+        df = pd.DataFrame(columns=units)
+        for j in units:
+            df[j] = calc_p_fail(self, j, self.alpha, TP, pb=pb,
+                                periods=periods)
+        return df
 
     def check_for_task(self, model, j, t):
         b = model.sb
@@ -406,7 +338,7 @@ class stnModel(object):
 
     def get_unit_profile(self, j, full=True):
         cols = ["period", "time", "unit", "task", "mode"]
-        prods = set([p[0] for p in self.Demand.keys()])
+        prods = self.stn.products
         demand = []
         for p in prods:
             cols.append(p)
@@ -433,7 +365,7 @@ class stnModel(object):
         m = self.model
         stn = self.stn
         cols = ["time"]
-        prods = set([p[0] for p in self.Demand.keys()])
+        prods = stn.products
         for p in prods:
             cols.append(p)
         df = pd.DataFrame(columns=cols)
@@ -459,17 +391,15 @@ class stnModelRobust(stnModel):
     def build(self, T_list, period=None, tindexed=True,
               alpha=0.5, **kwargs):
         assert period is not None
-        self.alpha = alpha
         stn = self.stn
+        self.alpha = alpha
         for j in stn.units:
             for i in stn.I[j]:
                 for k in stn.O[j]:
                     tm = i + "-" + k
                     p = stn.p[i, j, k]
-                    D = stn.D[i, j, k]
-                    stn.eps[i, j, k] = 1 - stn.deg[j].get_quantile(alpha, tm,
-                                                                   p)/D
-        super().build(T_list, period=period,
+                    stn.eps[i, j, k] = stn.deg[j].get_eps(alpha, tm, p)
+        super().build(T_list, alpha=alpha, period=period,
                       tindexed=tindexed, **kwargs)
 
     def add_blocks(self, TIMEs, TIMEp, decisionrule="continuous", **kwargs):
@@ -530,6 +460,7 @@ class stnStruct(object):
         self.tasks = set()          # set of task names
         self.units = set()          # set of unit names
         self.opmodes = set()        # set of operating mode names
+        self.products = []
 
         # constants
         self.U = 100                # big U
@@ -571,6 +502,7 @@ class stnStruct(object):
         self.vcost = {}
         self.Rmax = {}
         self.Rinit = {}
+        self.Rinit0 = {}
         self.eps = {}
 
         # characterization of units indexed by (task, unit, operating mode)
@@ -586,7 +518,8 @@ class stnStruct(object):
         self.modeorder = {}
 
     # defines states as .state(name, capacity, init)
-    def state(self, name, capacity=float('inf'), init=0, price=0, scost=0):
+    def state(self, name, capacity=float('inf'), init=0, price=0, scost=0,
+              prod=False):
         self.states.add(name)       # add to the set of states
         self.C[name] = capacity     # state capacity
         self.init[name] = init      # state initial value
@@ -594,6 +527,9 @@ class stnStruct(object):
         self.T_[name] = set()       # tasks fed from this state (outputs)
         self.price[name] = price    # per unit price of each state
         self.scost[name] = scost    # storage cost per (planning) interval
+        if prod:
+            if name not in self.products:
+                self.products.append(name)
 
     def task(self, name):
         self.tasks.add(name)        # add to set of tasks
@@ -630,6 +566,7 @@ class stnStruct(object):
             self.tau[unit] = 0
             self.Rmax[unit] = 0
             self.Rinit[unit] = 0
+            self.Rinit0[unit] = 0
             self.a[unit] = 0
             self.b[unit] = 0
             self.deg[unit] = degradationModel(unit)
@@ -644,6 +581,7 @@ class stnStruct(object):
         self.tau[unit] = max(tm, self.tau[unit])  # TODO: max is dumb
         self.Rmax[unit] = max(rmax, self.Rmax[unit])
         self.Rinit[unit] = max(rinit, self.Rinit[unit])
+        self.Rinit0[unit] = max(rinit, self.Rinit[unit])
         self.a[unit] = max(a, self.a[unit])
         self.b[unit] = max(b, self.b[unit])
         self.tauinit[unit] = tauinit
