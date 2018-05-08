@@ -50,15 +50,18 @@ try:
 except IOError:
     pass
 
-demand_1 = [150, 88, 125, 67, 166, 203, 90, 224,
-            174, 126, 66, 119, 234, 64,
-            103, 77, 132, 186, 174, 239, 124, 194, 91, 228]
-demand_2 = [200, 150, 197, 296, 191, 193, 214,
-            294, 247, 313, 226, 121, 197,
-            242, 220, 342, 355, 320, 335, 298, 252, 222, 324, 337]
-np.random.seed(42)
-demand_1 = np.random.uniform(size=24)*(120-50) + 50
-demand_2 = np.random.uniform(size=24)*(180-100) + 100
+# demand_1 = [150, 88, 125, 67, 166, 203, 90, 224,
+#             174, 126, 66, 119, 234, 64,
+#             103, 77, 132, 186, 174, 239, 124, 194, 91, 228]
+# demand_2 = [200, 150, 197, 296, 191, 193, 214,
+#             294, 247, 313, 226, 121, 197,
+#             242, 220, 342, 355, 320, 335, 298, 252, 222, 324, 337]
+np.random.seed(12)
+demand_1 = np.random.uniform(size=24)*(250-180) + 180
+demand_2 = np.random.uniform(size=24)*(350-270) + 270
+# np.random.seed(42)
+# demand_1 = np.random.uniform(size=24)*(120-50) + 50
+# demand_2 = np.random.uniform(size=24)*(180-100) + 100
 
 for n, q in enumerate(Q):
     # create instance
@@ -142,5 +145,5 @@ df.to_csv(rdir+"/results.csv")
 dfp = dfp.append(dfp2)
 dfp.to_pickle(rdir+"/profile.pkl")
 dfp.to_csv(rdir+"/profile.csv")
-pdf.to_pickle(rdir+"/pfail.pkl")
-pdf.to_csv(rdir+"/pfail.csv")
+# pdf.to_pickle(rdir+"/pfail.pkl")
+# pdf.to_csv(rdir+"/pfail.csv")

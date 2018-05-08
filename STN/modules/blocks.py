@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import dill
+import time
 import sys
 import matplotlib.pyplot as plt
 from deg import calc_p_fail
@@ -24,7 +25,7 @@ from deg import calc_p_fail
 class stnBlock(object):
     """Template for planning and scheduling blocks."""
 
-    def __init__(self, stn, T_list, Demand={}, **kwargs):
+    def __init__(self, stn, T_list, Demand={}, prfx="", **kwargs):
         """
         stn: object of class stnStruct
         T_list: [Tstart, Tend, dT]
@@ -37,16 +38,30 @@ class stnBlock(object):
         self.TIME = np.array(TIME)
         self.Demand = Demand
         self.alpha = 0.5
+        self.rid = 0
+        self.prefix = ''
+        self.rdir = 'results'
+        self.ttot = 0
+        self.prfx = prfx
+        self.inf = False
 
     def demand(self, state, time, Demand):
         """Set demand for state at time."""
         self.Demand[state, time] = Demand
 
-    def build(self, alpha=0.5, **kwargs):
+    def build(self, alpha=0.5, rdir='results', prefix='', **kwargs):
         """
         Initializes and builds model. Only call this if block is
         used individually.
         """
+        self.rdir = rdir
+        self.prefix = prefix
+        try:
+            df = pd.read_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+            self.rid = max(df["id"]) + 1
+        except IOError:
+            pass
+        self.prfx = self.rdir + "/" + self.prefix + str(self.rid)
         self.model = pyomo.ConcreteModel()
         m = self.model
         stn = self.stn
@@ -65,16 +80,16 @@ class stnBlock(object):
         m.Obj = pyomo.Objective(expr=m.Cost,
                                 sense=pyomo.minimize)
 
-    def solve(self, solver='cplex', prefix='',
-              rdir='results', solverparams=None,
+    def solve(self, solver='cplex', solverparams=None,
               save=False, trace=False, gantt=True, **kwargs):
         """Solves the block. Only call when block is used individually."""
+        ts = time.time()
         self.solver = pyomo.SolverFactory(solver)
         if solverparams is not None:
             for key, value in solverparams.items():
                 self.solver.options[key] = value
 
-        logfile = rdir + "/" + prefix + "STN.log"
+        logfile = self.prfx + "STN.log"
         results = self.solver.solve(self.model,
                                     tee=True,
                                     # keepfiles=True,
@@ -87,15 +102,16 @@ class stnBlock(object):
              results.solver.termination_condition ==
              TerminationCondition.maxTimeLimit)):
             if save:
-                with open(rdir+"/"+prefix+'output.txt', 'w') as f:
+                with open(self.prfx+'output.txt', 'w') as f:
                     f.write("STN Output:")
                     self.model.display(ostream=f)
-                with open(rdir+"/"+prefix+'STN.pyomo', 'wb') as dill_file:
+                with open(self.prfx+'STN.pyomo', 'wb') as dill_file:
                     dill.dump(self.model, dill_file)
             if gantt:
-                self.gantt(prefix=prefix, rdir=rdir)
+                self.gantt()
             if trace:
-                self.trace(prefix=prefix, rdir=rdir)
+                self.trace()
+        self.ttot = time.time() - ts
         if (results.solver.termination_condition ==
                 TerminationCondition.infeasible):
             self.inf = True
@@ -137,10 +153,10 @@ class stnBlock(object):
     def add_objective(self, **kwargs):
         raise NotImplementedError
 
-    def trace(self, prefix='', rdir=None):
+    def trace(self):
         raise NotImplementedError
 
-    def gantt(self, prefix='', rdir=None):
+    def gantt(self):
         raise NotImplementedError
 
 
@@ -418,7 +434,7 @@ class blockScheduling(stnBlock):
             k = "M"
         return [i, k, tend]
 
-    def get_unit_profile(self, j, full=True):
+    def get_unit_profile(self, units=None, full=False, save=True):
         """Get sequence of operating modes for unit j."""
         cols = ["time", "unit", "task", "mode"]
         prods = set(self.Demand.keys())
@@ -427,29 +443,42 @@ class blockScheduling(stnBlock):
             cols.append(p)
             demand.append(0)
         profile = pd.DataFrame(columns=cols)
-        tend = 0
-        for t in self.TIME:
-            tend_old = tend
-            if t >= tend:
-                [i, k, tend] = self.check_for_task(j, t)
-            line = [t, j, i, k]
-            for n, p in enumerate(prods):
-                if (p) in self.Demand:
-                    demand[n] = self.Demand[p]
-            line += demand
-            if full or t >= tend_old:
-                profile = profile.append(pd.Series(line,
-                                                   index=cols),
-                                         ignore_index=True)
+        if units is None:
+            units = self.stn.units
+        elif type(units) == str:
+            units = set([units])
+        for j in units:
+            tend = 0
+            for t in self.TIME:
+                tend_old = tend
+                if t >= tend:
+                    [i, k, tend] = self.check_for_task(j, t)
+                line = [t, j, i, k]
+                for n, p in enumerate(prods):
+                    if (p) in self.Demand:
+                        demand[n] = self.Demand[p]
+                line += demand
+                if full or t >= tend_old:
+                    profile = profile.append(pd.Series(line,
+                                                       index=cols),
+                                             ignore_index=True)
+        profile["id"] = self.rid
+        if save:
+            try:
+                df2 = pd.read_pickle(self.rdir+"/"+self.prefix+"profile.pkl")
+                df2 = df2.append(profile)
+            except IOError:
+                df2 = profile
+            df2.to_pickle(self.rdir+"/"+self.prefix+"profile.pkl")
+            df2.to_csv(self.rdir+"/"+self.prefix+"profile.csv")
         return profile
 
-    def gantt(self, prefix='', rdir=None):
+    def gantt(self):
         """
         Generate gantt graph.
             prefix: prepended to file name
             rdir: directory to store file
         """
-        assert rdir is not None
         b = self.b
         stn = self.stn
 
@@ -533,23 +562,22 @@ class blockScheduling(stnBlock):
         plt.ylim(-nbars-0.5, 0)
         plt.gca().set_yticks(ticks)
         plt.gca().set_yticklabels(lbls)
-        plt.savefig(rdir+"/"+prefix+'gantt_scheduling.png')
+        plt.savefig(self.prfx+'gantt_scheduling.png')
 
         plt.close("all")
 
-    def trace(self, prefix='', rdir=None):
+    def trace(self):
         """
         Generate trace.
             prefix: prepended to file name
             rdir: directory to store file
         """
-        assert rdir is not None
         # abbreviations
         b = self.b
         stn = self.stn
 
         oldstdout = sys.stdout
-        sys.stdout = open(rdir+"/"+prefix+'trace_scheduling.txt', 'w')
+        sys.stdout = open(self.prfx + 'trace_scheduling.txt', 'w')
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")
         for s in stn.states:
@@ -635,6 +663,41 @@ class blockScheduling(stnBlock):
                                                             b.S[s, t]()))
 
         sys.stdout = oldstdout
+
+    def eval(self, save=True):
+        cols = ["id", "CostStorage", "CostMaintenance",
+                "CostMainenanceFinal", "obj", "inf", "ttot", "gap"]
+        cols += self.stn.products
+        if not self.inf:
+            gap = self.solver._gap
+            if gap is None:
+                gap = 0
+            else:
+                gap = self.solver._gap/self.b.Obj()*100
+            cost_storage = self.b.CostStorage()
+            cost_maint = self.b.CostMaintenance()
+            cost_maint_final = self.b.CostMaintenanceFinal()
+            obj = self.b.Obj()
+            df = pd.DataFrame([[self.rid, cost_storage,
+                                cost_maint, cost_maint_final, obj, self.inf,
+                                self.ttot, gap] + [self.Demand[p] for p in
+                                                   self.stn.products]],
+                              columns=cols)
+        else:
+            df = pd.DataFrame([[self.rid, 0, 0, 0, "Inf", self.inf,
+                                self.ttot, "NA"] + [self.Demand[p] for p in
+                                                    self.stn.products]],
+                              columns=cols)
+        if save:
+            try:
+                df2 = pd.read_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+                df2 = df2.append(df)
+            except IOError:
+                df2 = df
+            df2.to_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+            df2.to_csv(self.rdir+"/"+self.prefix+"results.csv")
+
+        return df
 
 
 class blockSchedulingRobust(blockScheduling):
@@ -1282,7 +1345,7 @@ class blockPlanning(stnBlock):
                            ignore_index=True)
         return df
 
-    def calc_p_fail(self, units=None, TP=None, periods=0, **kwargs):
+    def calc_p_fail(self, units=None, TP=None, periods=0, save=True, **kwargs):
         assert TP is not None
         if units is None:
             units = self.stn.units
@@ -1292,15 +1355,25 @@ class blockPlanning(stnBlock):
         for j in units:
             df[j] = calc_p_fail(self, j, self.alpha, TP, pb=True,
                                 periods=periods, **kwargs)
+        df["id"] = self.rid
+        df["alpha"] = self.alpha
+
+        if save:
+            try:
+                df2 = pd.read_pickle(self.rdir+"/"+self.prefix+"pfail.pkl")
+                df2 = df2.append(df)
+            except IOError:
+                df2 = df
+            df2.to_pickle(self.rdir+"/"+self.prefix+"pfail.pkl")
+            df2.to_csv(self.rdir+"/"+self.prefix+"pfail.csv")
         return df
 
-    def gantt(self, prefix='', rdir=None):
+    def gantt(self):
         """
         Generate gantt graph.
             prefix: prepended to file name
             rdir: directory to store file
         """
-        assert rdir is not None
         stn = self.stn
         b = self.b
 
@@ -1368,22 +1441,22 @@ class blockPlanning(stnBlock):
         plt.gca().set_yticklabels(lbls)
         plt.gca().set_xticks(self.TIME)
         plt.gca().set_xticklabels(np.round(100*self.TIME/168)/100)
-        plt.savefig(rdir+"/"+prefix+'gantt_planning.png')
+        plt.savefig(self.prfx+'gantt_planning.png')
         plt.close('all')
 
-    def trace(self, prefix='', rdir=None):
+    def trace(self):
         """
         Generate trace.
             prefix: prepended to file name
             rdir: directory to store file
         """
-        assert rdir is not None
         # abbreviations
         b = self.b
         stn = self.stn
 
         oldstdout = sys.stdout
-        sys.stdout = open(rdir+"/"+prefix+'trace_planning.txt', 'w')
+        sys.stdout = open(self.prfx + 'trace_planning.txt',
+                          'w')
         print("\nStarting Conditions")
         print("\n    Initial State Inventories are:")
         for s in stn.states:
@@ -1434,6 +1507,59 @@ class blockPlanning(stnBlock):
             # print('\n    Unit Assignments are now:')
             fmt = '        {0:s}: {1:s}, {2:.2f} kg, {3:.1f} hours to go.'
         sys.stdout = oldstdout
+
+    def eval(self, save=True, **kwargs):
+        cols = ["id", "alpha", "CostStorage", "CostMaintenance",
+                "CostMainenanceFinal", "Cost", "obj", "inf", "ttot", "gap"]
+        cols += self.stn.products
+        units = [j for j in self.stn.units]
+        dem = [0 for p in self.stn.products]
+        cols += units
+        if not self.inf:
+            b = self.b
+            gap = self.solver._gap
+            if gap is None:
+                gap = 0
+            else:
+                gap = self.solver._gap/b.Obj()*100
+            cost_storage = 0
+            cost_maint = 0
+            cost = 0
+            for t in self.TIME:
+                cost_storage += b.CostStorage[t]()
+                cost_maint += b.CostMaintenance[t]()
+            cost_maint_final = b.CostMaintenanceFinal()
+            cost += (cost_storage + cost_maint
+                     + cost_maint_final)
+            obj = self.b.Obj()
+            pf = self.calc_p_fail(save=save, **kwargs)
+            pl = []
+            for j in units:
+                pl.append(max(pf[j]))
+            for t in self.TIME:
+                for n, p in enumerate(self.stn.products):
+                    if (p, t) in self.Demand:
+                        dem[n] += self.Demand[(p, t)]
+            df = pd.DataFrame([[self.rid, self.alpha, cost_storage,
+                                cost_maint, cost_maint_final, cost, obj,
+                                self.inf, self.ttot, gap]
+                               + dem + pl],
+                              columns=cols)
+        else:
+            df = pd.DataFrame([[self.rid, self.alpha, 0, 0, 0, 0, "Inf",
+                                self.inf, self.ttot, "NA"] + dem
+                               + [0 for j in units]],
+                              columns=cols)
+        if save:
+            try:
+                df2 = pd.read_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+                df2 = df2.append(df, ignore_index=True)
+            except IOError:
+                df2 = df
+            df2.to_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+            df2.to_csv(self.rdir+"/"+self.prefix+"results.csv")
+
+        return df
 
 
 class blockPlanningRobust(blockPlanning):

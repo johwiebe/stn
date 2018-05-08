@@ -6,6 +6,7 @@ Deterministic model of STN with degradation. Based on Biondi et al 2017.
 import pyomo.environ as pyomo
 from pyomo.opt import SolverStatus, TerminationCondition
 import numpy as np
+import time
 import pandas as pd
 import dill
 from deg import degradationModel, calc_p_fail
@@ -26,9 +27,12 @@ class stnModel(object):
         self.gapmax = 0
         self.gapmean = 0
         self.alpha = 0.5
+        self.rid = 0
+        self.prefix = ''
+        self.rdir = 'results'
 
-    def solve(self, T_list, periods=1, solver='cplex', prefix='',
-              rdir='results', solverparams=None,
+    def solve(self, T_list, periods=1, solver='cplex',
+              solverparams=None,
               save=False, trace=False, gantt=True, **kwargs):
         """
         Solves the model
@@ -45,19 +49,21 @@ class stnModel(object):
 
         """
         # Initialize solver and set parameters
+        ts = time.time()
         self.solver = pyomo.SolverFactory(solver)
         if solverparams is not None:
             for key, value in solverparams.items():
                 self.solver.options[key] = value
-        prefix_old = prefix
 
         # Rolling horizon
         for period in range(0, periods):
             if periods > 1:
-                prefix = prefix_old + "_" + str(period)
+                rolling = True
+            else:
+                rolling = False
             # Build model
-            self.build(T_list, period=period, **kwargs)
-            logfile = rdir + "/" + prefix + "STN.log"
+            self.build(T_list, period=period, rolling=rolling, **kwargs)
+            logfile = self.prfx + "STN.log"
             # Solve model
             results = self.solver.solve(self.model,
                                         tee=True,
@@ -86,28 +92,40 @@ class stnModel(object):
                                 * gap/obj*100)
                 # Save results
                 if save:
-                    with open(rdir+"/"+prefix+'output.txt', 'w') as f:
+                    with open(self.prfx+'output.txt', 'w') as f:
                         f.write("STN Output:")
                         self.model.display(ostream=f)
-                    with open(rdir+"/"+prefix+'STN.pyomo', 'wb') as dill_file:
+                    with open(self.prfx+'STN.pyomo', 'wb') as dill_file:
                         dill.dump(self.model, dill_file)
                 if gantt:
-                    self.sb.gantt(prefix=prefix, rdir=rdir)
-                    self.pb.gantt(prefix=prefix, rdir=rdir)
+                    self.sb.gantt()
+                    self.pb.gantt()
                 if trace:
-                    self.sb.trace(prefix=prefix, rdir=rdir)
-                    self.pb.trace(prefix=prefix, rdir=rdir)
+                    self.sb.trace()
+                    self.pb.trace()
                 if periods > 1:
                     self.transfer_next_period(**kwargs)
                 # Add current model to list
                 self.m_list.append(self.model)
             else:
                 break
+        self.ttot = time.time() - ts
 
     def build(self, T_list, objective="terminal", period=None, alpha=0.5,
-              extend=False, **kwargs):
+              extend=False, rdir='results', prefix='', rolling=False,
+              **kwargs):
         """Build STN model."""
         assert period is not None
+        self.rdir = rdir
+        self.prefix = prefix
+        try:
+            df = pd.read_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+            self.rid = max(df["id"]) + 1
+        except IOError:
+            pass
+        self.prfx = self.rdir + "/" + self.prefix + str(self.rid)
+        if rolling:
+            self.prfx += "_" + str(period)
         self.model = pyomo.ConcreteModel()
         m = self.model
         stn = self.stn
@@ -161,11 +179,11 @@ class stnModel(object):
         m = self.model
         m.sb = pyomo.Block()
         self.sb = blockScheduling(stn, TIMEs,
-                                  self.Demand, **kwargs)
+                                  self.Demand, prfx=self.prfx, **kwargs)
         self.sb.define_block(m.sb, **kwargs)
         m.pb = pyomo.Block()
         self.pb = blockPlanning(stn, TIMEp,
-                                self.Demand, **kwargs)
+                                self.Demand, prfx=self.prfx, **kwargs)
         self.pb.define_block(m.pb, **kwargs)
 
     def add_unit_constraints(self):
@@ -305,7 +323,7 @@ class stnModel(object):
     def get_gap(self):
         return self.gapmax, self.gapmean, self.gapmin
 
-    def calc_p_fail(self, units=None, TP=None, periods=0, pb=True):
+    def calc_p_fail(self, units=None, TP=None, periods=0, pb=True, save=True):
         assert TP is not None
         if units is None:
             units = self.stn.units
@@ -315,6 +333,16 @@ class stnModel(object):
         for j in units:
             df[j] = calc_p_fail(self, j, self.alpha, TP, pb=pb,
                                 periods=periods)
+        df["alpha"] = self.alpha
+        df["id"] = self.rid
+        if save:
+            try:
+                df2 = pd.read_pickle(self.rdir+"/"+self.prefix+"pfail.pkl")
+                df2 = df2.append(df)
+            except IOError:
+                df2 = df
+            df2.to_pickle(self.rdir+"/"+self.prefix+"pfail.pkl")
+            df2.to_csv(self.rdir+"/"+self.prefix+"pfail.csv")
         return df
 
     def check_for_task(self, model, j, t):
@@ -382,6 +410,48 @@ class stnModel(object):
                            ignore_index=True)
         return df
 
+    def eval(self, save=True, **kwargs):
+        cols = ["id", "alpha", "CostStorage", "CostMaintenance",
+                "CostMainenanceFinal", "Cost", "slack", "ttot",
+                "gapmin", "gapmean", "gapmax"]
+        cols += self.stn.products
+        units = [j for j in self.stn.units]
+        dem = [0 for p in self.stn.products]
+        cols += units
+        cost_storage = 0
+        cost_maint = 0
+        cost = 0
+        slack = 0
+        for i, m in enumerate(self.m_list):
+            cost_storage += m.sb.CostStorage()
+            cost_maint += m.sb.CostMaintenance()
+            slack += m.TotSlack()
+            for n, p in enumerate(self.stn.products):
+                t = i*self.pb.dT
+                if (p, t) in self.Demand:
+                    dem[n] += self.Demand[(p, t)]
+        cost_maint_final = self.sb.get_cost_maintenance_terminal()
+        cost += (cost_storage + cost_maint
+                 + cost_maint_final)
+        pf = self.calc_p_fail(save=save, **kwargs)
+        pl = []
+        for j in units:
+            pl.append(max(pf[j]))
+        df = pd.DataFrame([[self.rid, self.alpha, cost_storage,
+                            cost_maint, cost_maint_final, cost,
+                            slack, self.ttot,
+                            self.gapmin, self.gapmean, self.gapmax]
+                           + dem + pl],
+                          columns=cols)
+        if save:
+            try:
+                df2 = pd.read_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+                df2 = df2.append(df)
+            except IOError:
+                df2 = df
+            df2.to_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+            df2.to_csv(self.rdir+"/"+self.prefix+"results.csv")
+
 
 class stnModelRobust(stnModel):
     """Robust model for STN."""
@@ -417,12 +487,14 @@ class stnModelRobust(stnModel):
                                         np.array([t for t in TIMEs]),
                                         self.Demand,
                                         decisionrule=decisionrule,
+                                        prfx=self.prfx,
                                         **kwargs)
         self.sb.define_block(m.sb, decisionrule=decisionrule, **kwargs)
         self.pb = blockPlanningRobust(stn,
                                       np.array([t for t in TIMEp]),
                                       self.Demand,
                                       decisionrule=decisionrule,
+                                      prfx=self.prfx,
                                       **kwargs)
         self.pb.define_block(m.pb, decisionrule=decisionrule, **kwargs)
 

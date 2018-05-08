@@ -26,8 +26,8 @@ stn.state('S8',     init=2000000)
 stn.state('S9',     init=0, scost=1)
 stn.state('S10',     init=0, scost=1)
 stn.state('S11',     init=2000000)
-stn.state('S12',     init=0, scost=5)
-stn.state('S13',     init=0, scost=5)
+stn.state('S12',     init=0, scost=5, prod=True)
+stn.state('S13',     init=0, scost=5, prod=True)
 
 # state to task arcs
 stn.stArc('S1',   'T1')
@@ -108,5 +108,5 @@ stn.ijkdata('T7', 'Mixer_1', 'Fast', 33, 6, 0.27*6)
 stn.ijkdata('T7', 'Mixer_2', 'Normal', 51, 4, 0.22*4)
 stn.ijkdata('T7', 'Mixer_2', 'Fast', 33, 6, 0.27*6)
 
-with open("p3D.dat", "wb") as dill_file:
+with open("../data/p3.dat", "wb") as dill_file:
     dill.dump(stn, dill_file)

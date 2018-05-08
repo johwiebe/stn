@@ -18,7 +18,8 @@ from blocks import blockPlanning  # noqa
 import deg  # noqa
 
 rdir = "/home/jw3617/STN/results"
-TPfile = "../data/biondi2TP.pkl"
+pref = "low_"
+TPfile = "../data/biondi3TP.pkl"
 # TPfile = "../data/TP.pkl"
 Q = np.arange(0.02, 0.51, 0.02)
 # Q = [0.35]
@@ -36,19 +37,6 @@ try:
     df = df.append(df2)
 except IOError:
     pass
-dcols = ["id", "period", "time", "unit", "task", "mode", "P1", "P2"]
-dfp = pd.DataFrame(columns=dcols)
-try:
-    dfp2 = pd.read_pickle(rdir+"/profile.pkl")
-except IOError:
-    dfp2 = dfp
-pcols = ["id", "eps", "alpha", "Reactor_1", "Reactor_2", "Heater", "Still"]
-pdf = pd.DataFrame(columns=pcols)
-try:
-    pdf2 = pd.read_pickle(rdir+"/pfail.pkl")
-    pdf.append(pdf2)
-except IOError:
-    pass
 
 demand_1 = [150, 88, 125, 67, 166, 203, 90, 224,
             174, 126, 66, 119, 234, 64,
@@ -60,9 +48,9 @@ demand_2 = [200, 150, 197, 296, 191, 193, 214,
 np.random.seed(12)
 demand_1 = np.random.uniform(size=24)*(250-180) + 180
 demand_2 = np.random.uniform(size=24)*(350-270) + 270
-# np.random.seed(42)
-# demand_1 = np.random.uniform(size=24)*(120-50) + 50
-# demand_2 = np.random.uniform(size=24)*(180-100) + 100
+np.random.seed(42)
+demand_1 = np.random.uniform(size=24)*(120-50) + 50
+demand_2 = np.random.uniform(size=24)*(180-100) + 100
 
 for n, q in enumerate(Q):
     # create instance
@@ -85,7 +73,8 @@ for n, q in enumerate(Q):
     for i in range(0, len(TIMEp)):
         model.demand('Product_1', TIMEp[i], demand_1[i])
         model.demand('Product_2', TIMEp[i], demand_2[i])
-    model.build(objective="terminal", decisionrule="continuous", alpha=q)
+    model.build(objective="terminal", decisionrule="continuous", alpha=q,
+                rdir=rdir, prefix=pref, rid=rid)
 
     eps = 1 - sct.norm.ppf(q=q, loc=1, scale=0.27)
     solverparams = {"timelimit": 120,
@@ -98,13 +87,9 @@ for n, q in enumerate(Q):
     #             trace=True,
     #             save=True,
     #             solverparams=solverparams)
-    model.loadres("/home/jw3617/STN/results_biondi_mc_highD/biondiD_"
+    model.loadres("/home/jw3617/STN/results_biondi_mc_lowD/biondiD_"
                   + str(rid)+"STN.pyomo")
     pdfloc = model.calc_p_fail(TP=TPfile, periods=12, Nmc=100)
-    pdfloc["id"] = rid
-    pdfloc["eps"] = eps
-    pdfloc["alpha"] = q
-    pdf = pdf.append(pdfloc)
     preactor1 = max(pdfloc["Reactor_1"])
     preactor2 = max(pdfloc["Reactor_2"])
     pheater = max(pdfloc["Heater"])
@@ -136,8 +121,3 @@ for n, q in enumerate(Q):
     print(df)
 df.to_pickle(rdir+"/results.pkl")
 df.to_csv(rdir+"/results.csv")
-dfp = dfp.append(dfp2)
-dfp.to_pickle(rdir+"/profile.pkl")
-dfp.to_csv(rdir+"/profile.csv")
-pdf.to_pickle(rdir+"/pfail.pkl")
-pdf.to_csv(rdir+"/pfail.csv")

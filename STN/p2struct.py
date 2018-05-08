@@ -18,7 +18,7 @@ stn = stnStruct()
 stn.state('S1',     init=2000000)
 stn.state('S2',     init=0, scost=1)
 stn.state('S3',     init=0, scost=1)
-stn.state('S4',     init=0, scost=1)
+stn.state('S4',     init=0, scost=1, prod=True)
 
 # state to task arcs
 stn.stArc('S1',   'T1')
@@ -67,5 +67,5 @@ stn.ijkdata('T3', 'U5', 'Slow', 18, 2, 0.22*2)
 stn.ijkdata('T3', 'U5', 'Normal', 12, 4, 0.27*4)
 stn.ijkdata('T3', 'U5', 'Fast', 6, 6, 0.31*6)
 
-with open("p2D.dat", "wb") as dill_file:
+with open("../data/p2.dat", "wb") as dill_file:
     dill.dump(stn, dill_file)

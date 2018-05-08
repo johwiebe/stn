@@ -10,6 +10,7 @@ import dill
 from joblib import Parallel, delayed
 import scipy.stats as sct
 from math import floor
+import collections
 
 
 class degradationModel(object):
@@ -394,3 +395,123 @@ def check_feasibility_lambda(lam, N, delta):
         return lam
     else:
         return 10000000
+
+
+def calc_p_fail_dem(dem, stn_file, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
+                    periods=0, pb=True, dTs=0, dTp=0, *args, **kwargs):
+    """
+    Calculate probability of unit failure
+        model: solved stn model
+        j: unit
+        alpha: uncertainty set size parameter
+        TPfile: file with logistic regression model for markov chain
+        Nmc: number of sequences generated from markov chain
+        N: Number of Monte-Carlo evaluations for each sequence
+        dt: time step for naive approach
+        periods: number of planning periods to evaluate (all if periods=0)
+        pb: if set to True, approach by Poetzelberger is used (Wiener process)
+    """
+    Ncpus = 8  # number of CPUs to used for parallel execution
+    # make data global for parallel execution
+    global stn, table
+    with open(stn_file, "rb") as dill_file:
+        stn = dill.load(dill_file)
+    if periods > 0:
+        dem = [d[0:periods] for d in dem]
+    # get schedules from model scheduling horizon
+    mc0 = ["None-None"]
+    t0 = [dTs]
+    Sinit = stn.Rinit[j]
+    #  load logistic regression model
+    # with open(TPfile, "rb") as dill_file:
+    #     TP = dill.load(dill_file)
+    TP = TPfile
+    # get production targets for planning horizon
+    # generate Nmc sequences from Markov chain
+    st = time.time()
+    mclist = []
+    mcslist = []
+    tlist = []
+    tslist = []
+    D = {"None-None": 0, "M-M": 0}
+    # calculate all relavent transition probabilities once
+    table = {}
+    for i in stn.I[j]:
+        for k in stn.O[j]:
+            tm = i + "-" + k
+            ptm = stn.p[i, j, k]
+            # Dtm = stn.D[i, j, k]
+            # eps = 1 - stn.deg[j].get_quantile(alpha, tm, ptm)/Dtm
+            Dtm = stn.deg[j].get_mu(tm, ptm)
+            eps = stn.deg[j].get_eps(alpha, tm, ptm)
+            D.update({tm: Dtm*(1+eps)})
+    for tm in D.keys():
+        logreg = TP[j, tm]
+        for period, d in enumerate(dem[0]):
+            if type(logreg) == str:
+                table[tm, period] = pd.DataFrame([1], columns=[logreg])
+                tabprint = table[tm, period]
+            else:
+                prob = logreg.predict_proba([[d[period] for d in dem]])
+                table[tm, period] = np.cumsum(pd.DataFrame(prob,
+                                              columns=logreg.classes_), axis=1)
+                tabprint = pd.DataFrame(prob, columns=logreg.classes_)
+        # print(tabprint, tm)
+    # generate sequences in parallel
+    res = Parallel(n_jobs=Ncpus)(delayed(generate_seq_mc)(D,
+                                                          j, "None-None",
+                                                          t0[-1],
+                                                          dTs, dTp,
+                                                          dem,
+                                                          # eps,
+                                                          Sinit=Sinit)
+                                 for i in range(0, Nmc))
+    # append generated sequences to scheduling horizon
+    # occ = []
+    Ncount = 0
+    tms = D.keys()
+    hist = {tm: 0 for tm in tms}
+    for n in range(0, Nmc):
+        mc = mc0 + res[n][0]
+        # occ.append(sum(np.array(mc) == "Separation-Slow"))
+        c = collections.Counter(mc)
+        for k in c:
+            hist[k] += c[k]/Nmc
+        # Ncount += collections.Counter(mc)["M-M"]
+    return hist
+    print(Ncount)
+    # return occ
+    # print(occ)
+    # estimate failure probabilities in parallel
+    Smax = stn.Rmax[j]
+    Sinit = stn.Rinit0[j]
+    # approach by Poetzelberger
+    # if pb:
+    #     GL, LL = get_gradient(stn, j)
+    #     inflist = Parallel(n_jobs=Ncpus)(delayed(sim_wiener_pb)(mcslist[i],
+    #                                                             tslist[i],
+    #                                                             GL, LL,
+    #                                                             Nmcs=N,
+    #                                                             Smax=Smax,
+    #                                                             Sinit=Sinit,
+    #                                                             *args,
+    #                                                             **kwargs)
+    #                                      for i in range(0, len(mcslist)))
+    #     inflist = np.array(inflist)*100
+    # # naive approach
+    # else:
+    #     Darrlist = []
+    #     for n in range(0, Nmc):
+    #         Darrlist.append(get_deg_profile(mclist[n], stn, j, dTs, dt,
+    #                                         Sinit=Sinit))
+    #     inflist = Parallel(n_jobs=Ncpus)(delayed(sim_wiener_naive)(Darr, j,
+    #                                                                N=N,
+    #                                                                Rmax=Smax,
+    #                                                                Sinit=Sinit,
+    #                                                                *args,
+    #                                                                **kwargs)
+    #                                      for Darr in Darrlist)
+    #     inflist = np.array(inflist)/N*100
+
+    # print("Time taken:" + str(time.time()-st) + ", Pfail:" + str(max(inflist)))
+    # return inflist
