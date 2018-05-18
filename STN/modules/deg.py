@@ -56,7 +56,7 @@ class degradationModel(object):
 
 
 def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
-                periods=0, pb=True, dTs=3, *args, **kwargs):
+                periods=0, pb=True, dTs=None, freq=False, knn=None, *args, **kwargs):
     """
     Calculate probability of unit failure
         model: solved stn model
@@ -92,6 +92,7 @@ def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
         dTp = model.pb.dT
         dTs = model.sb.dT
     else:
+        assert dTs is not None
         mc0 = ["None-None"]
         t0 = [dTs]
         Sinit = stn.Rinit[j]
@@ -116,42 +117,49 @@ def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
     mcslist = []
     tlist = []
     tslist = []
-    D = {"None-None": 0, "M-M": 0}
-    # calculate all relavent transition probabilities once
-    table = {}
-    for i in stn.I[j]:
-        for k in stn.O[j]:
-            tm = i + "-" + k
-            ptm = stn.p[i, j, k]
-            # Dtm = stn.D[i, j, k]
-            # eps = 1 - stn.deg[j].get_quantile(alpha, tm, ptm)/Dtm
-            Dtm = stn.deg[j].get_mu(tm, ptm)
-            eps = stn.deg[j].get_eps(alpha, tm, ptm)
-            D.update({tm: Dtm*(1+eps)})
-    for tm in D.keys():
-        logreg = TP[j, tm]
-        for period, d in enumerate(dem[0]):
-            if type(logreg) == str:
-                table[tm, period] = pd.DataFrame([1], columns=[logreg])
-            else:
-                prob = logreg.predict_proba([[d[period] for d in dem]])
-                table[tm, period] = np.cumsum(pd.DataFrame(prob,
-                                              columns=logreg.classes_), axis=1)
-    # generate sequences in parallel
-    res = Parallel(n_jobs=Ncpus)(delayed(generate_seq_mc)(D,
-                                                          j, "None-None",
-                                                          t0[-1],
-                                                          dTs, dTp,
-                                                          dem,
-                                                          # eps,
-                                                          Sinit=Sinit)
-                                 for i in range(0, Nmc))
+    if not freq:
+        D = {"None-None": 0, "M-M": 0}
+        # calculate all relavent transition probabilities once
+        table = {}
+        for i in stn.I[j]:
+            for k in stn.O[j]:
+                tm = i + "-" + k
+                ptm = stn.p[i, j, k]
+                # Dtm = stn.D[i, j, k]
+                # eps = 1 - stn.deg[j].get_quantile(alpha, tm, ptm)/Dtm
+                Dtm = stn.deg[j].get_mu(tm, ptm)
+                eps = stn.deg[j].get_eps(alpha, tm, ptm)
+                D.update({tm: Dtm*(1+eps)})
+        if knn is None:
+            for tm in D.keys():
+                logreg = TP[j, tm]
+                for period, d in enumerate(dem[0]):
+                    if type(logreg) == str:
+                        table[tm, period] = pd.DataFrame([1], columns=[logreg])
+                    else:
+                        prob = logreg.predict_proba([[d[period] for d in dem]])
+                        table[tm, period] = np.cumsum(pd.DataFrame(prob,
+                                                      columns=logreg.classes_),
+                                                      axis=1)
+        else:
+            table = get_knn_TP(knn[0], dem, knn[1], j)
+        # generate sequences in parallel
+        res = Parallel(n_jobs=Ncpus)(delayed(generate_seq_mc)(D,
+                                                              j, "None-None",
+                                                              t0[-1],
+                                                              dTs, dTp,
+                                                              dem,
+                                                              # eps,
+                                                              Sinit=Sinit)
+                                     for i in range(0, Nmc))
+    else:
+        res = gen_seqs(Nmc, dem, j, alpha, TPfile, stn, dTs, dTp)
     # append generated sequences to scheduling horizon
     # occ = []
     for n in range(0, Nmc):
         mc = mc0 + res[n][0]
         # occ.append(sum(np.array(mc) == "Separation-Slow"))
-        t = t0 + res[n][2]
+        t = t0 + res[n][1]
         mcshort, tshort = get_short_mc(mc, t)
         mclist.append(mc)
         tlist.append(t)
@@ -237,7 +245,7 @@ def generate_seq_mc(D, j, s0, t0, dTs, dTp, demand, Sinit=0):
         else:
             i, k = s.split("-")
             t += stn.p[i, j, k]
-    return mc, Slist, tlist
+    return mc, tlist
 
 
 def sim_wiener_naive(Darr, j, N=1, Sinit=0, S0=0,
@@ -397,20 +405,12 @@ def check_feasibility_lambda(lam, N, delta):
         return 10000000
 
 
-def calc_p_fail_dem(dem, stn_file, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
+def calc_p_fail_dem(dem, stn_file, j, alpha, TP=None, TPfile=None,
+                    Nmc=100, N=1000, dt=3,
                     periods=0, pb=True, dTs=0, dTp=0, *args, **kwargs):
     """
-    Calculate probability of unit failure
-        model: solved stn model
-        j: unit
-        alpha: uncertainty set size parameter
-        TPfile: file with logistic regression model for markov chain
-        Nmc: number of sequences generated from markov chain
-        N: Number of Monte-Carlo evaluations for each sequence
-        dt: time step for naive approach
-        periods: number of planning periods to evaluate (all if periods=0)
-        pb: if set to True, approach by Poetzelberger is used (Wiener process)
     """
+    assert TP is not None or TPfile is not None
     Ncpus = 8  # number of CPUs to used for parallel execution
     # make data global for parallel execution
     global stn, table
@@ -422,17 +422,12 @@ def calc_p_fail_dem(dem, stn_file, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
     mc0 = ["None-None"]
     t0 = [dTs]
     Sinit = stn.Rinit[j]
-    #  load logistic regression model
-    # with open(TPfile, "rb") as dill_file:
-    #     TP = dill.load(dill_file)
-    TP = TPfile
+    # TP = TPfile
+    if TPfile is not None:
+        with open(TPfile, "rb") as f:
+            TP = dill.load(f)
     # get production targets for planning horizon
     # generate Nmc sequences from Markov chain
-    st = time.time()
-    mclist = []
-    mcslist = []
-    tlist = []
-    tslist = []
     D = {"None-None": 0, "M-M": 0}
     # calculate all relavent transition probabilities once
     table = {}
@@ -440,8 +435,6 @@ def calc_p_fail_dem(dem, stn_file, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
         for k in stn.O[j]:
             tm = i + "-" + k
             ptm = stn.p[i, j, k]
-            # Dtm = stn.D[i, j, k]
-            # eps = 1 - stn.deg[j].get_quantile(alpha, tm, ptm)/Dtm
             Dtm = stn.deg[j].get_mu(tm, ptm)
             eps = stn.deg[j].get_eps(alpha, tm, ptm)
             D.update({tm: Dtm*(1+eps)})
@@ -450,13 +443,10 @@ def calc_p_fail_dem(dem, stn_file, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
         for period, d in enumerate(dem[0]):
             if type(logreg) == str:
                 table[tm, period] = pd.DataFrame([1], columns=[logreg])
-                tabprint = table[tm, period]
             else:
                 prob = logreg.predict_proba([[d[period] for d in dem]])
                 table[tm, period] = np.cumsum(pd.DataFrame(prob,
                                               columns=logreg.classes_), axis=1)
-                tabprint = pd.DataFrame(prob, columns=logreg.classes_)
-        # print(tabprint, tm)
     # generate sequences in parallel
     res = Parallel(n_jobs=Ncpus)(delayed(generate_seq_mc)(D,
                                                           j, "None-None",
@@ -467,51 +457,200 @@ def calc_p_fail_dem(dem, stn_file, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
                                                           Sinit=Sinit)
                                  for i in range(0, Nmc))
     # append generated sequences to scheduling horizon
-    # occ = []
-    Ncount = 0
     tms = D.keys()
-    hist = {tm: 0 for tm in tms}
+    hist = {tm: [0] for tm in tms}
+    hist_min = {tm: [float('inf')] for tm in tms}
+    hist_max = {tm: [0] for tm in tms}
     for n in range(0, Nmc):
         mc = mc0 + res[n][0]
-        # occ.append(sum(np.array(mc) == "Separation-Slow"))
         c = collections.Counter(mc)
         for k in c:
-            hist[k] += c[k]/Nmc
-        # Ncount += collections.Counter(mc)["M-M"]
-    return hist
-    print(Ncount)
-    # return occ
-    # print(occ)
-    # estimate failure probabilities in parallel
-    Smax = stn.Rmax[j]
-    Sinit = stn.Rinit0[j]
-    # approach by Poetzelberger
-    # if pb:
-    #     GL, LL = get_gradient(stn, j)
-    #     inflist = Parallel(n_jobs=Ncpus)(delayed(sim_wiener_pb)(mcslist[i],
-    #                                                             tslist[i],
-    #                                                             GL, LL,
-    #                                                             Nmcs=N,
-    #                                                             Smax=Smax,
-    #                                                             Sinit=Sinit,
-    #                                                             *args,
-    #                                                             **kwargs)
-    #                                      for i in range(0, len(mcslist)))
-    #     inflist = np.array(inflist)*100
-    # # naive approach
-    # else:
-    #     Darrlist = []
-    #     for n in range(0, Nmc):
-    #         Darrlist.append(get_deg_profile(mclist[n], stn, j, dTs, dt,
-    #                                         Sinit=Sinit))
-    #     inflist = Parallel(n_jobs=Ncpus)(delayed(sim_wiener_naive)(Darr, j,
-    #                                                                N=N,
-    #                                                                Rmax=Smax,
-    #                                                                Sinit=Sinit,
-    #                                                                *args,
-    #                                                                **kwargs)
-    #                                      for Darr in Darrlist)
-    #     inflist = np.array(inflist)/N*100
+            hist[k][0] += c[k]/Nmc
+            hist_min[k][0] = min(hist_min[k][0], c[k])
+            hist_max[k][0] = max(hist_max[k][0], c[k])
+    df = pd.DataFrame.from_dict(hist)
+    # df["type"] = "mean"
+    # df2 = pd.DataFrame.from_dict(hist_min)
+    # df2["type"] = "min"
+    # df = df.append(df2)
+    # df2 = pd.DataFrame.from_dict(hist_max)
+    # df2["type"] = "max"
+    # df = df.append(df2)
+    return df
 
-    # print("Time taken:" + str(time.time()-st) + ", Pfail:" + str(max(inflist)))
-    # return inflist
+
+def score(TP, df, prods, stn, stn_file, alpha, dTs, dTp):
+    scr = 0
+    print("Calc score")
+    df["taskmode"] = df["task"] + "-" + df["mode"]
+    for j in stn.units:
+        dfj = df[df["unit"] == j].copy()
+        dfj = dfj.reset_index()
+        for rid in np.unique(dfj["id"]):
+            dfrid = dfj[dfj["id"] == rid]
+            dem = [[d] for d in dfrid.loc[dfrid.index[0], prods].tolist()]
+            hist_pred = calc_p_fail_dem(dem, stn_file, j, alpha, TP=TP,
+                                        dTs=dTs, dTp=dTp)
+            c = collections.Counter(dfj.loc[dfj["id"] == rid, "taskmode"])
+            hist_true = {tm: c[tm] for tm in hist_pred}
+            scr += sum(np.array([(hist_true[tm] - hist_pred[tm])**2 for tm in
+                                 hist_true]))
+        print(scr)
+    return scr
+
+
+class Seq(object):
+    def __init__(self, tm=[], t=[]):
+        self.tm = tm
+        self.t = t
+
+    def __iadd__(self, other):
+        self.tm += other.tm
+        self.t += other.t
+        return self
+
+    def __add__(self, other):
+        return Seq(self.tm + other.tm, self.t + other.t)
+
+    def __repr__(self):
+        return 'Seq(%r, %r)' % (self.tm, self.t)
+
+    def __len__(self):
+        return len(self.t)
+
+    def pop(self):
+        return self.tm.pop(), self.t.pop()
+
+
+class seqGen(object):
+    def __init__(self, TPfile, stn, dTs, dTp):
+        self.stn = stn
+        self.dTs = dTs
+        self.dTp = dTp
+
+
+def gen_seqs(N, dem, j, alpha, TPfile, stn0, dTs, dTp, Sinit=None):
+    Ncpus = 8
+    global table, D, stn
+    with open(TPfile, "rb") as f:
+        TP = dill.load(f)
+    if Sinit is None:
+        Sinit = stn.Rinit[j]
+    stn = stn0
+    table = {}
+    tms = set(i + "-" + k for i in stn.I[j] for k in stn.O[j])
+    for tm in tms:
+        logreg = TP[j, tm]
+        for period, d in enumerate(dem[0]):
+            if logreg is None:
+                table[tm, period] = pd.DataFrame([1], columns=['0'])
+            else:
+                prob = logreg.predict_proba([[d[period] for d in dem]])
+                table[tm, period] = pd.DataFrame(prob,
+                                                 columns=logreg.classes_)
+    D = {"None-None": 0, "M-M": 0}
+    # calculate all relavent transition probabilities once
+    for i in stn.I[j]:
+        for k in stn.O[j]:
+            tm = i + "-" + k
+            ptm = stn.p[i, j, k]
+            Dtm = stn.deg[j].get_mu(tm, ptm)
+            eps = stn.deg[j].get_eps(alpha, tm, ptm)
+            D.update({tm: Dtm*(1+eps)})
+    gen_seq(dem, j, alpha, Sinit, dTp, dTs)
+    res = Parallel(n_jobs=Ncpus)(delayed(gen_seq)(dem, j, alpha,
+                                                  Sinit, dTp,
+                                                  dTs)
+                                 for i in range(0, N))
+    return [[i.tm, i.t] for i in res]
+
+
+def gen_seq(dem, j, alpha, Sinit, dTp, dTs):
+    seq = Seq()
+    tms = set(i + "-" + k for i in stn.I[j] for k in stn.O[j])
+    for p, d in enumerate(dem[0]):
+        tmseq = [np.random.choice(table[tm, p].columns.values,
+                                  p=table[tm, p].iloc[0, :].values)
+                 for tm in tms]
+        tmseq = list(map(int, map(float, tmseq)))
+        tmseq = [tm for i, tm in enumerate(tms) for j in
+                 range(0, tmseq[i])]
+        tmseq_split = [tuple(tm.split('-')) for tm in tmseq]
+        dtseq = [stn.p[i, j, k] for i, k in tmseq_split]
+        if sum(dtseq) > dTp:
+            c = list(zip(tmseq, dtseq))
+            np.random.shuffle(c)
+            tmseq, dtseq = [i for i in map(list, zip(*c))]
+            while sum(dtseq) > dTp:
+                tmseq.pop()
+                dtseq.pop()
+        Nnn = (dTp - sum(dtseq)) // dTs
+        tmseq += ["None-None"] * Nnn
+        dtseq += [dTs] * Nnn
+        c = list(zip(tmseq, dtseq))
+        np.random.shuffle(c)
+        tmseq, dtseq = [i for i in map(list, zip(*c))]
+        seq += Seq(tmseq, dtseq)
+    seq = __insert_maint(seq, j, alpha, Sinit, dTp*len(dem[0]))
+    return seq
+
+
+def __insert_maint(seq, j, alpha, Sinit, Tp):
+    tmseq = []
+    tseq = [0]
+    s = Sinit
+    while (len(seq) > 0) and (tseq[-1] < Tp):
+        tm, dt = seq.pop()
+        s += D[tm]
+        if s > stn.Rmax[j]:
+            tmseq += ["M-M"]
+            tseq += [tseq[-1] + stn.tau[j]]
+            s = D[tm]
+        tmseq += [tm]
+        tseq += [tseq[-1] + dt]
+    return Seq(tmseq, tseq[1:])
+
+
+def get_knn_TP(proffile, dem, k, j):
+    with open(proffile, "rb") as f:
+        prof = dill.load(f)
+    dfj = prof[prof["unit"] == j].copy()
+    dfj = dfj.reset_index(drop=True)
+    res = dfj[stn.products + ["id"]].drop_duplicates()
+    dem = [list(d) for d in zip(*dem)]
+    for p, d in enumerate(dem):
+        for i in stn.I[j]:
+            for k in stn.O[k]:
+                tm = i + "-" + k
+                dis = sum([(res[p] - d[i])**2 for i, p in
+                           enumerate(stn.products)])
+                knn = tuple(res.loc[dis.nsmallest(k).index, "id"])
+                df = dfj[dfj["id"].isin(knn)]
+                table[tm, p] = np.cumsum(get_trans_prob(df, tm, j))
+
+
+def get_trans_prob(df, tm, j):
+    df["taskmode-1"] = df["taskmode"].shift(-1)
+    df.loc[pd.isna(df["taskmode"]), "taskmode-1"] = "None-None"
+    if np.any(df["taskmode"] == tm):
+        table = get_hist(df[df["taskmode"] == tm], "taskmode-1")
+    else:
+        table = get_hist(df[df["taskmode"] == "None-None"], "taskmode-1")
+    return table
+
+
+def get_hist(df, col):
+    table = pd.DataFrame.from_dict(collections.Counter(df[col]),
+                                   orient="index")
+    table = table.rename(columns={0: "count"})
+    table["p"] = table["count"]/sum(table["count"])
+    return table
+
+
+if __name__ == '__main__':
+    with open('../data/p2.dat', 'rb') as f:
+        stn = dill.load(f)
+    seqgen = seqGen('../data/p2freq.pkl', stn, 3, 168)
+    k = gen_seqs(10, [[2250, 750, 1250, 1750, 2000, 2000, 2000, 2000,
+                       2000]], 'U2', 0.5, '../data/p2freq.pkl', stn, 3, 168)
+    import ipdb; ipdb.set_trace()  # noqa

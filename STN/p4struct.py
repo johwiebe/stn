@@ -20,8 +20,8 @@ stn.state('F2',     init=2000000)
 stn.state('I1',     init=0, capacity=200, scost=1)
 stn.state('I2',     init=0, capacity=100, scost=1)
 stn.state('I3',     init=0, capacity=500, scost=1)
-stn.state('P1',     init=0, capacity=1000, scost=5)
-stn.state('P2',     init=0, capacity=1000, scost=5)
+stn.state('P1',     init=0, capacity=1000, scost=5, prod=True)
+stn.state('P2',     init=0, capacity=1000, scost=5, prod=True)
 
 # state to task arcs
 stn.stArc('F1',   'T1', rho=0.8)
@@ -39,42 +39,41 @@ stn.tsArc('T3', 'P1', rho=1.0)
 stn.tsArc('T4', 'P2', rho=1.0)
 
 # unit-task data
-stn.unit('R1',    'T1',    Bmin=0, Bmax=100, tm=21, rmax=120,
+stn.unit('R1',    'T1',    Bmin=40, Bmax=80, tm=21, rmax=70,
          # rinit=50, a=600, b=300)
          rinit=10, a=600, b=0)
-stn.unit('R1',    'T2',    Bmin=0, Bmax=100)
-stn.unit('R2',    'T1',    Bmin=0, Bmax=100, tm=21, rmax=120,
+stn.unit('R1',    'T2',    Bmin=40, Bmax=80)
+stn.unit('R2',    'T1',    Bmin=25, Bmax=50, tm=21, rmax=120,
          # rinit=50, a=600, b=300)
          rinit=10, a=600, b=0)
-stn.unit('R2',    'T2',    Bmin=0, Bmax=100)
-stn.unit('R3',    'T3',    Bmin=0, Bmax=100, tm=21, rmax=120,
+stn.unit('R2',    'T2',    Bmin=25, Bmax=50)
+stn.unit('R3',    'T3',    Bmin=40, Bmax=80, tm=21, rmax=70,
          # rinit=50, a=600, b=300)
          rinit=10, a=600, b=0)
-stn.unit('R3',    'T4',    Bmin=0, Bmax=100)
+stn.unit('R3',    'T4',    Bmin=40, Bmax=80)
 
 stn.opmode('Slow')
 stn.opmode('Normal')
 stn.opmode('Fast')
 
-stn.ijkdata('T1', 'R1', 'Slow', 33, 3, 0.22*3)
-stn.ijkdata('T1', 'R1', 'Normal', 24, 5, 0.27*5)
-stn.ijkdata('T1', 'R1', 'Fast', 18, 8, 0.27*8)
-stn.ijkdata('T2', 'R1', 'Slow', 33, 3, 0.22*3)
+stn.ijkdata('T1', 'R1', 'Slow', 24, 3, 0.22*3)
+stn.ijkdata('T1', 'R1', 'Normal', 15, 5, 0.27*5)
+stn.ijkdata('T1', 'R1', 'Fast', 9, 8, 0.27*8)
+stn.ijkdata('T2', 'R1', 'Slow', 36, 3, 0.22*3)
 stn.ijkdata('T2', 'R1', 'Normal', 24, 5, 0.27*5)
-stn.ijkdata('T2', 'R1', 'Fast', 18, 8, 0.27*8)
-stn.ijkdata('T1', 'R2', 'Slow', 33, 3, 0.22*3)
-stn.ijkdata('T1', 'R2', 'Normal', 24, 5, 0.27*5)
-stn.ijkdata('T1', 'R2', 'Fast', 18, 8, 0.27*8)
-stn.ijkdata('T2', 'R2', 'Slow', 33, 3, 0.22*3)
+stn.ijkdata('T2', 'R1', 'Fast', 15, 8, 0.27*8)
+stn.ijkdata('T1', 'R2', 'Slow', 24, 3, 0.22*3)
+stn.ijkdata('T1', 'R2', 'Normal', 15, 5, 0.27*5)
+stn.ijkdata('T1', 'R2', 'Fast', 9, 8, 0.27*8)
+stn.ijkdata('T2', 'R2', 'Slow', 36, 3, 0.22*3)
 stn.ijkdata('T2', 'R2', 'Normal', 24, 5, 0.27*5)
-stn.ijkdata('T2', 'R2', 'Fast', 18, 8, 0.27*8)
-stn.ijkdata('T3', 'R3', 'Slow', 33, 3, 0.22*3)
-stn.ijkdata('T3', 'R3', 'Normal', 24, 5, 0.27*5)
-stn.ijkdata('T3', 'R3', 'Fast', 18, 8, 0.27*8)
-stn.ijkdata('T4', 'R3', 'Slow', 33, 3, 0.22*3)
-stn.ijkdata('T4', 'R3', 'Normal', 24, 5, 0.27*5)
-stn.ijkdata('T4', 'R3', 'Fast', 18, 8, 0.27*8)
+stn.ijkdata('T2', 'R2', 'Fast', 15, 8, 0.27*8)
+stn.ijkdata('T3', 'R3', 'Slow', 12, 3, 0.22*3)
+stn.ijkdata('T3', 'R3', 'Normal', 9, 5, 0.27*5)
+stn.ijkdata('T3', 'R3', 'Fast', 6, 8, 0.27*8)
+stn.ijkdata('T4', 'R3', 'Slow', 24, 3, 0.22*3)
+stn.ijkdata('T4', 'R3', 'Normal', 15, 5, 0.27*5)
+stn.ijkdata('T4', 'R3', 'Fast', 9, 8, 0.27*8)
 
-import ipdb; ipdb.set_trace()
-with open("p4D.dat", "wb") as dill_file:
+with open("../data/p4.dat", "wb") as dill_file:
     dill.dump(stn, dill_file)

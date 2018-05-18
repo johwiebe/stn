@@ -20,7 +20,7 @@ demand_2 = [250, 188, 325, 267, 166, 303, 290, 224,
             174, 326, 266, 219, 334, 164,
             203, 277, 332, 286, 174, 239, 324, 194, 291, 228]
 # create instance
-with open("../data/p4D.dat", "rb") as dill_file:
+with open("../data/p4.dat", "rb") as dill_file:
     stn = dill.load(dill_file)
 model = stnModel(stn)
 
@@ -34,7 +34,8 @@ for i in range(0, len(TIMEp)):
     model.demand('P1', TIMEp[i], demand_1[i])
     model.demand('P2', TIMEp[i], demand_2[i])
 
-solverparams = {"timelimit": 360}
+solverparams = {"timelimit": 60,
+                "mipgap": 0.005}
 model.solve([Ts, dTs, Tp, dTp],
             solver="cplex",
             objective="terminal",

@@ -9,6 +9,7 @@ import numpy as np
 import time
 import pandas as pd
 import dill
+import collections
 from deg import degradationModel, calc_p_fail
 from blocks import (blockScheduling, blockSchedulingRobust,
                     blockPlanning, blockPlanningRobust)
@@ -113,16 +114,19 @@ class stnModel(object):
 
     def build(self, T_list, objective="terminal", period=None, alpha=0.5,
               extend=False, rdir='results', prefix='', rolling=False,
-              **kwargs):
+              rid=None, **kwargs):
         """Build STN model."""
         assert period is not None
         self.rdir = rdir
         self.prefix = prefix
-        try:
-            df = pd.read_pickle(self.rdir+"/"+self.prefix+"results.pkl")
-            self.rid = max(df["id"]) + 1
-        except IOError:
-            pass
+        if rid is not None:
+            self.rid = rid
+        else:
+            try:
+                df = pd.read_pickle(self.rdir+"/"+self.prefix+"results.pkl")
+                self.rid = max(df["id"]) + 1
+            except IOError:
+                pass
         self.prfx = self.rdir + "/" + self.prefix + str(self.rid)
         if rolling:
             self.prfx += "_" + str(period)
@@ -364,7 +368,7 @@ class stnModel(object):
             k = "M"
         return [i, k, tend]
 
-    def get_unit_profile(self, j, full=True):
+    def get_unit_profile(self, j, full=False):
         cols = ["period", "time", "unit", "task", "mode"]
         prods = self.stn.products
         demand = []
@@ -388,6 +392,19 @@ class stnModel(object):
                                                        index=cols),
                                              ignore_index=True)
         return profile
+
+    def get_hist(self, j):
+        stn = self.stn
+        tms = ["None-None", "M-M"]
+        for i in stn.I[j]:
+            for k in stn.O[j]:
+                tms.append(i + "-" + k)
+        prof = self.get_unit_profile(j)
+        c = collections.Counter(prof["task"] + "-" + prof["mode"])
+        df = pd.DataFrame.from_dict({tm: [c[tm]] for tm in tms})
+        df["alpha"] = self.alpha
+        df["rid"] = self.rid
+        return df
 
     def get_production_targets(self):
         m = self.model
