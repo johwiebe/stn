@@ -403,13 +403,14 @@ class blockScheduling(stnBlock):
                           * (stn.a[j] - stn.b[j]))
         b.cons.add(b.CostMaintenanceFinal == costFinal)
 
-    def get_cost_maintenance_terminal(self):
+    def get_cost_maint_terminal(self, b=None):
         """Calculate terminal cost of maintenance."""
         stn = self.stn
-        b = self.b
+        if b is None:
+            b = self.b
         costFinal = 0
         for j in stn.units:
-            costFinal += ((b.R[j, self.T - self.dT]()
+            costFinal += ((b.R[j, b.T - b.dT]()
                            / stn.Rmax[j])
                           * (stn.a[j] - stn.b[j]))
         return costFinal
@@ -1344,6 +1345,15 @@ class blockPlanning(stnBlock):
             df = df.append(pd.Series(line, index=cols),
                            ignore_index=True)
         return df
+
+    def get_cost_maint_terminal(self, periods):
+        stn = self.stn
+        b = self.b
+        t = (periods - 1) * self.dT
+        cost = 0
+        for j in stn.units:
+            cost += (b.R[j, t]() / stn.Rmax[j] * (stn.a[j] - stn.b[j]))
+        return cost
 
     def calc_p_fail(self, units=None, TP=None, periods=0, save=True, **kwargs):
         assert TP is not None

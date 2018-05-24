@@ -26,7 +26,6 @@ def calc_metrics(rdir, stn, scenario, bound, j):
                                              "Pstill": "Still",
                                              "Pheater": "Heater"})
         det = det[list(stn.units) + ["alpha"]].reset_index(drop=True)
-    print(rdir+"/mc/"+scenario+fname[bound])
     with open(rdir+"/mc/"+scenario+fname[bound], "rb") as f:
         mc = dill.load(f)
         mc = mc[list(stn.units) + ["alpha"]].reset_index(drop=True)

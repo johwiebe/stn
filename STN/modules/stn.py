@@ -427,7 +427,9 @@ class stnModel(object):
                            ignore_index=True)
         return df
 
-    def eval(self, save=True, **kwargs):
+    def eval(self, save=True, periods=None, **kwargs):
+        if periods is None:
+            periods = len(self.m_list)
         cols = ["id", "alpha", "CostStorage", "CostMaintenance",
                 "CostMainenanceFinal", "Cost", "slack", "ttot",
                 "gapmin", "gapmean", "gapmax"]
@@ -439,15 +441,25 @@ class stnModel(object):
         cost_maint = 0
         cost = 0
         slack = 0
+        last_i = 0
         for i, m in enumerate(self.m_list):
-            cost_storage += m.sb.CostStorage()
-            cost_maint += m.sb.CostMaintenance()
-            slack += m.TotSlack()
-            for n, p in enumerate(self.stn.products):
-                t = i*self.pb.dT
-                if (p, t) in self.Demand:
-                    dem[n] += self.Demand[(p, t)]
-        cost_maint_final = self.sb.get_cost_maintenance_terminal()
+            if i < periods:
+                cost_storage += m.sb.CostStorage()
+                cost_maint += m.sb.CostMaintenance()
+                slack += m.TotSlack()
+                for n, p in enumerate(self.stn.products):
+                    t = i*self.pb.dT
+                    if (p, t) in self.Demand:
+                        dem[n] += self.Demand[(p, t)]
+                last_i = i
+        if periods <= len(self.m_list):
+            last_sb = self.m_list[last_i].sb
+            cost_maint_final = self.sb.get_cost_maint_terminal(last_sb)
+        else:
+            for i in range(len(self.m_list), periods):
+                cost_storage += m.pb.CostStorage[i*self.pb.dT]()
+                cost_maint += m.pb.CostMaintenance[i*self.pb.dT]()
+            cost_maint_final = self.pb.get_cost_maint_terminal(periods)
         cost += (cost_storage + cost_maint
                  + cost_maint_final)
         pf = self.calc_p_fail(save=save, **kwargs)
@@ -468,6 +480,7 @@ class stnModel(object):
                 df2 = df
             df2.to_pickle(self.rdir+"/"+self.prefix+"results.pkl")
             df2.to_csv(self.rdir+"/"+self.prefix+"results.csv")
+        return df
 
 
 class stnModelRobust(stnModel):
