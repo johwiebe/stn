@@ -431,7 +431,7 @@ class stnModel(object):
         if periods is None:
             periods = len(self.m_list)
         cols = ["id", "alpha", "CostStorage", "CostMaintenance",
-                "CostMainenanceFinal", "Cost", "slack", "ttot",
+                "CostMainenanceFinal", "Cost", "Cost0", "slack", "ttot",
                 "gapmin", "gapmean", "gapmax"]
         cols += self.stn.products
         units = [j for j in self.stn.units]
@@ -440,6 +440,7 @@ class stnModel(object):
         cost_storage = 0
         cost_maint = 0
         cost = 0
+        cost0 = self.m_list[0].Obj()
         slack = 0
         last_i = 0
         for i, m in enumerate(self.m_list):
@@ -462,13 +463,13 @@ class stnModel(object):
             cost_maint_final = self.pb.get_cost_maint_terminal(periods)
         cost += (cost_storage + cost_maint
                  + cost_maint_final)
-        pf = self.calc_p_fail(save=save, **kwargs)
+        pf = self.calc_p_fail(save=save, periods=periods, **kwargs)
         pl = []
         for j in units:
             pl.append(max(pf[j]))
         df = pd.DataFrame([[self.rid, self.alpha, cost_storage,
                             cost_maint, cost_maint_final, cost,
-                            slack, self.ttot,
+                            cost0, slack, self.ttot,
                             self.gapmin, self.gapmean, self.gapmax]
                            + dem + pl],
                           columns=cols)
