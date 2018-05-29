@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Oct  9 08:37:40 2017
+Created on Mon May  21 08:37:40 2018
 
-@author: jeff
+@author: johannes
 """
 
 import sys
@@ -11,9 +11,10 @@ import yaml
 import dill
 import pandas as pd
 from skopt import gp_minimize
+from sklearn.preprocessing import MinMaxScaler
 sys.path.append('../STN/modules')
-from stn import stnModel, stnModelRobust # noqa
 import deg  # noqa
+from stn import stnModel, stnModelRobust # noqa
 
 
 def target(x):
@@ -48,16 +49,26 @@ def target(x):
     for j in stn.units:
         obj += df[j]/100*y["ccm"][j]
 
-    return float(obj)
+    return scaler.transform(float(obj))[0][0]
 
 
 if __name__ == "__main__":
-    global y
+    global y, scaler
     with open(sys.argv[1], "r") as f:
         y = yaml.load(f)
 
-    bo = gp_minimize(target, [(0.05, 0.5)], acq_func="EI", n_calls=20,
-                     n_random_starts=5)  # , noise=0.2)
+    scaler = MinMaxScaler()
+    scaler.fit([[0], [1]])
+
+    x_init = [[0.02], [0.1], [0.2], [0.3], [0.4], [0.5]]
+    y_init = [[target(x)] for x in x_init]
+    scaler.fit(y_init)
+    y_init = [yi[0] for yi in scaler.transform(y_init)]
+    N = 15
+
+    bo = gp_minimize(target, [(0.02, 0.5)], x0=x_init, y0=y_init,
+                     acq_func="EI", n_calls=N, verbose=True,
+                     n_random_starts=0, noise="gaussian", n_jobs=-1)
     bo_x = [x[0] for x in bo.x_iters]
     bo_y = list(bo.func_vals)
     df = pd.DataFrame([list(i) for i in zip(bo_x, bo_y)],
