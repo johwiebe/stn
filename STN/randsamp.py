@@ -67,5 +67,5 @@ if __name__ == "__main__":
 
     df = pd.DataFrame([list(i) for i in zip(x0, y0)],
                       columns=["alpha", "cost"])
-    df.to_pickle(y["rdir"] + y["prfx"] + "/bo.pkl")
-    df.to_csv(y["rdir"] + y["prfx"] + "/bo.csv")
+    df.to_pickle(y["rdir"] + "/" + y["prfx"] + "obj.pkl")
+    df.to_csv(y["rdir"] + "/" + y["prfx"] + "obj.csv")
