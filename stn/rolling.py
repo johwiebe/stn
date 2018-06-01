@@ -1,21 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-""" Toy example of STN with degradation.
-
-Units:
-    Heater
-    Reactor
-
-Tasks:
-    Heating
-    Reaction_1
-    Reaction_2
-
-Operating modes:
-    Slow
-    Normal
-
-"""
+"""Solve STN model using rolling horizon."""
 
 import sys
 import yaml
