@@ -22,8 +22,8 @@ with open(y["stn"], "rb") as dill_file:
 N = y["N"]
 mlhs = pyDOE.lhs(len(stn.products), samples=y["N"], criterion="maximin")
 dem = {}
-for p in stn.products:
-    dem[p] = (np.array([mlhs[i][0] for i in range(0, N)])
+for p_ind, p in enumerate(stn.products):
+    dem[p] = (np.array([mlhs[i][p_ind] for i in range(0, N)])
               * (y["max"][p] - y["min"][p])
               + y["min"][p])
 
