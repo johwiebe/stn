@@ -33,7 +33,7 @@ for index, row in res.iterrows():
                 rdir=y["rdir"], prefix=y["prfx"]+sys.argv[2])
 
     model.loadres(prfx + str(row["id"]) + "STN.pyomo")
-    df = model.calc_p_fail(TP=y["TP"], periods=12, Nmc=1000, dTs=y["dTs"],
+    df = model.calc_p_fail(TP=y["TP"], periods=12, Nmc=100, dTs=y["dTs"],
                            freq=y["freq"])
     for j in stn.units:
         res.loc[index, j] = max(df[j])
