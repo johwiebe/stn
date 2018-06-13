@@ -32,7 +32,7 @@ for n, q in enumerate(y["alphas"]):
     model.solve([y["Ts"], y["dTs"], y["Tp"], y["dTp"]],
                 solver="cplex",
                 objective="terminal",
-                periods=y["periods"],
+                periods=y["periods"]["rolling"],
                 prefix=y["prfx"],
                 rdir=y["rdir"],
                 save=True,
@@ -40,4 +40,4 @@ for n, q in enumerate(y["alphas"]):
                 trace=True,
                 solverparams=y["solverparams"],
                 tindexed=False)
-    model.eval(periods=y["periods"], TP=y["TP"])
+    model.eval(periods=y["periods"]["eval"], TP=y["TP"])
