@@ -6,6 +6,7 @@ Calculate performance metrics logistic regression.
 
 import sys
 import dill
+import argparse
 import numpy as np
 import pandas as pd
 sys.path.append('../STN/modules')
@@ -14,7 +15,7 @@ import deg  # noqa
 
 
 def calc_metrics(rdir, stn, scenario, bound, j):
-    fname = {"mc": "_newlhsmc_results.pkl", "freq": "_newlhsfreq_results.pkl"}
+    fname = {"mc": "_mc_results.pkl", "freq": "_freq_results.pkl"}
     print(rdir+"/det/"+scenario+"_results.pkl")
     with open(rdir+"/det/"+scenario+"_results.pkl", "rb") as f:
         det = dill.load(f)
@@ -32,24 +33,35 @@ def calc_metrics(rdir, stn, scenario, bound, j):
     rms_all = np.sqrt(sum((det[j] - det["mc"]) ** 2)/N)
     detmax = det.loc[det.groupby("alpha")[j].idxmax(),
                      [j, "alpha", "mc"]]
-    rms_max = np.sqrt(sum((detmax[j] - detmax["mc"]) ** 2)/N)
+    rms_max = np.sqrt(sum((detmax[j] - detmax["mc"]) ** 2)/detmax.shape[0])
     p_out = sum(det[j] > det["mc"]) / N * 100
-    return [j, scenario, bound, rms_all, rms_max, p_out]
+    detout = det[det[j] > det["mc"]]
+    rms_out = 0
+    if detout.shape[0] > 0:
+        rms_out = np.sqrt(sum((detout[j] - detout["mc"]) ** 2)/detout.shape[0])
+    detweird = det
+    detweird["val"] = detweird[j] - detweird["mc"]
+    detweird.loc[detweird["val"] < 0, "val"] = 0
+    rms_weird = np.sqrt(sum(detweird["val"])/N)
+    return [j, scenario, bound, rms_all, rms_max, p_out, rms_out, rms_weird]
 
 
-rdir = sys.argv[1]
-stn_file = sys.argv[2]
-with open(stn_file, "rb") as f:
-    stn = dill.load(f)
-scenarios = ["low", "avg", "high"]
-bounds = ["mc", "freq"]
-fname = {"mc": "_newlhsmc_results.pkl", "freq": "_newlhsfreq_results.pkl"}
-d = [calc_metrics(rdir, stn, s, b, j)
-     for j in stn.units
-     for s in scenarios
-     for b in bounds]
-df = pd.DataFrame(d, columns=["unit", "scenario", "bound", "rms_all",
-                              "rms_max", "p_out"])
-df.to_pickle(rdir + "/metricsnew.pkl")
-df.to_csv(rdir + "/metricsnew.csv")
-print(df)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("rdir", help="directory with results")
+    parser.add_argument("stn", help="stn data file")
+    args = parser.parse_args()
+    with open(args.stn, "rb") as f:
+        stn = dill.load(f)
+    scenarios = ["low", "avg", "high"]
+    bounds = ["mc", "freq"]
+    fname = {"mc": "_mc_results.pkl", "freq": "_freq_results.pkl"}
+    d = [calc_metrics(args.rdir, stn, s, b, j)
+         for j in stn.units
+         for s in scenarios
+         for b in bounds]
+    df = pd.DataFrame(d, columns=["unit", "scenario", "bound", "rms_all",
+                                  "rms_max", "p_out", "rms_out", "rms_weird"])
+    df.to_pickle(args.rdir + "/metrics2.pkl")
+    df.to_csv(args.rdir + "/metrics2.csv")
+    print(df)
