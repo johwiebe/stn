@@ -3,5 +3,5 @@
 
 import matplotlib
 matplotlib.use('Agg')
-from stn.models import stnStruct  # noqa
+from stn.models import stnStruct, stnModel, stnModelRobust  # noqa
 from stn.blocks import blockPlanning  # noqa
