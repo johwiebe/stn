@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from sklearn import linear_model
 from sklearn.model_selection import KFold
-from stn import deg  # noqa
+import stn.deg as deg  # noqa
 from stn import blockPlanning  # noqa
 
 
@@ -124,14 +124,14 @@ def get_logreg_freq(prof, tm, j, prods):
 
 
 if __name__ == '__main__':
-    prof_file = '/home/jw3617/STN/results_p4/lhs/profile.pkl'
-    stn_file = "data/p4.dat"
+    prof_file = '/home/jw3617/STN/results_p6/lhs/profile.pkl'
+    stn_file = "data/p6.dat"
     prof = pd.read_pickle(prof_file)
     with open(stn_file, "rb") as dill_file:
         stn = dill.load(dill_file)
     TP = get_log_reg_list_freq(prof, stn)
-    with open("data/p4freq.pkl", "wb") as dill_file:
+    with open("data/p6freq.pkl", "wb") as dill_file:
         dill.dump(TP, dill_file)
     TP = get_log_reg_list(prof, stn)
-    with open("data/p4mc.pkl", "wb") as dill_file:
+    with open("data/p6mc.pkl", "wb") as dill_file:
         dill.dump(TP, dill_file)
