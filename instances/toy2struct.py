@@ -18,9 +18,10 @@ Operating modes:
 """
 
 import sys
+import os
 import dill
-sys.path.append('../STN/modules')
-
+os.chdir(os.getcwd() + "/" + os.path.split(sys.argv[0])[0])
+sys.path.append('..')
 from stn import stnStruct  # noqa
 
 # create instance
