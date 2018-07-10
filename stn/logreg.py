@@ -51,10 +51,10 @@ def get_logreg(prof, tm, j, prods):
                                                      solver="lbfgs",
                                                      # solver="sag",
                                                      max_iter=10000,
-                                                     verbose=0)
+                                                     verbose=2)
         else:
             logreg = linear_model.LogisticRegression(max_iter=10000,
-                                                     verbose=0)
+                                                     verbose=2)
         logreg.fit(X, Y)
         return logreg
     elif dfj.shape[0] > 0:
@@ -126,11 +126,14 @@ def get_logreg_freq(prof, tm, j, prods):
 
 
 if __name__ == '__main__':
-    prof_file = '/home/jw3617/STN/results_p6/lhs/profile.pkl'
+    prof_file = '/home/jw3617/STN/results_p6/lhs2/profile.pkl'
     stn_file = "../data/p6.dat"
     prof = pd.read_pickle(prof_file)
     with open(stn_file, "rb") as dill_file:
         stn = dill.load(dill_file)
     TP = get_log_reg_list_freq(prof, stn)
-    with open("../data/p6freq.pkl", "wb") as dill_file:
+    with open("../data/p6freq_new.pkl", "wb") as dill_file:
+        dill.dump(TP, dill_file)
+    TP = get_log_reg_list(prof, stn)
+    with open("../data/p6mc_new.pkl", "wb") as dill_file:
         dill.dump(TP, dill_file)

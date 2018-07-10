@@ -1,0 +1,9 @@
+Ts:  168
+dTs: 3
+N:   200
+stn:  ../data/p6.dat
+rdir: /home/jw3617/STN/results_p6/lhs2
+max: {P1: 2000, P2: 2000, P3: 2000, P4: 2000}
+min: {P1: 500, P2: 500, P3: 500, P4: 500}
+solverparams: {"timelimit": 60}
+
