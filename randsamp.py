@@ -3,14 +3,12 @@
 """Find optimal alpha by random sampling."""
 
 import argparse
-import sys
 import yaml
 import dill
 import functools
 import pandas as pd
 import numpy as np
-sys.path.append('../STN/modules')
-import deg  # noqa
+import stn.deg as deg  # noqa
 from stn import stnModel, stnModelRobust # noqa
 
 
