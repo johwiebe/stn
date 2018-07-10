@@ -106,6 +106,5 @@ ENV/
 *.swp
 
 # Project specific directories
-data/
 results/
 old/
