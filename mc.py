@@ -6,9 +6,8 @@
 import sys
 import dill
 import yaml
-sys.path.append('../STN/modules')
 from stn import blockPlanning  # noqa
-from stn import deg  # noqa
+import stn.deg as deg # noqa
 
 with open(sys.argv[1], "r") as f:
     y = yaml.load(f)
