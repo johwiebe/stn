@@ -4,14 +4,12 @@
 Calculate performance metrics logistic regression.
 """
 
-import sys
 import dill
 import argparse
 import numpy as np
 import pandas as pd
-sys.path.append('../STN/modules')
-from blocks import blockPlanning  # noqa
-import deg  # noqa
+from stn import blockPlanning  # noqa
+import stn.deg as deg  # noqa
 
 
 def calc_metrics(rdir, stn, scenario, bound, j):
@@ -62,6 +60,6 @@ if __name__ == "__main__":
          for b in bounds]
     df = pd.DataFrame(d, columns=["unit", "scenario", "bound", "rms_all",
                                   "rms_max", "p_out", "rms_out", "rms_weird"])
-    df.to_pickle(args.rdir + "/metrics2.pkl")
-    df.to_csv(args.rdir + "/metrics2.csv")
+    df.to_pickle(args.rdir + "/metrics.pkl")
+    df.to_csv(args.rdir + "/metrics.csv")
     print(df)
