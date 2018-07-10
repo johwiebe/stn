@@ -165,8 +165,7 @@ def calc_p_fail(model, j, alpha, TPfile, Nmc=100, N=1000, dt=3,
         tlist.append(t)
         mcslist.append(mcshort)
         tslist.append(tshort)
-    # return occ
-    # print(occ)
+
     # estimate failure probabilities in parallel
     Smax = model.stn.Rmax[j]
     Sinit = model.stn.Rinit0[j]
@@ -350,7 +349,7 @@ def get_gradient(stn, j):
             taskmode = i + "-" + k
             GL[taskmode] = stn.deg[j].get_mu(taskmode)
             LL[taskmode] = (stn.deg[j].get_sd(taskmode))**2
-    # TODO: move default values for mue, sd to stn
+    # TODO: move default values for mu, sd to stn
     GL["None-None"] = 0
     LL["None-None"] = 0.05**2
     GL["M-M"] = 0
