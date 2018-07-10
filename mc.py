@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Oct  9 08:37:40 2017
-
-@author: jeff
 """
 
 import sys
 import dill
 import yaml
 sys.path.append('../STN/modules')
-from blocks import blockPlanning  # noqa
-import deg  # noqa
+from stn import blockPlanning  # noqa
+from stn import deg  # noqa
 
 with open(sys.argv[1], "r") as f:
     y = yaml.load(f)
