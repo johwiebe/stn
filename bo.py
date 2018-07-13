@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon May  21 08:37:40 2018
-
-@author: johannes
 """
 
-import sys
 import yaml
 import dill
 import functools
 import argparse
 import pandas as pd
+import stn.deg as deg  # noqa
+from stn import stnModel, stnModelRobust # noqa
 from skopt import gp_minimize
 from sklearn.preprocessing import MinMaxScaler
-sys.path.append('../STN/modules')
-import deg  # noqa
-from stn import stnModel, stnModelRobust # noqa
 
 
 def target(y, scaler, x):

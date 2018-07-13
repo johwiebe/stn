@@ -18,8 +18,8 @@ import seaborn as sns
 import dill
 import time
 import sys
-import matplotlib.pyplot as plt
-from deg import calc_p_fail
+import matplotlib.pyplot as plt  # noqa
+from stn.deg import calc_p_fail  # noqa
 
 
 class stnBlock(object):

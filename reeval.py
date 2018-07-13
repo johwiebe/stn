@@ -5,7 +5,6 @@ import sys
 import pandas as pd
 import yaml
 import dill
-sys.path.append("../STN/modules")
 from stn import blockPlanning  # noqa
 
 
@@ -32,7 +31,7 @@ for index, row in res.iterrows():
                 alpha=row["alpha"],
                 rdir=y["rdir"], prefix=y["prfx"]+sys.argv[2])
 
-    model.loadres(prfx + str(row["id"]) + "STN.pyomo")
+    model.loadres(prfx + str(int(row["id"])) + "STN.pyomo")
     df = model.calc_p_fail(TP=y["TP"], periods=12, Nmc=100, dTs=y["dTs"],
                            freq=y["freq"])
     for j in stn.units:

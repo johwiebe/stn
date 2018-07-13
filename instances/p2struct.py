@@ -7,8 +7,10 @@ Created on Mon Oct  9 08:37:40 2017
 """
 
 import sys
+import os
 import dill
-sys.path.append('../STN/modules')
+os.chdir(os.getcwd() + "/" + os.path.split(sys.argv[0])[0])
+sys.path.append('..')
 from stn import stnStruct # noqa
 
 # create instance

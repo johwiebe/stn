@@ -10,9 +10,9 @@ import time
 import pandas as pd
 import dill
 import collections
-from deg import degradationModel, calc_p_fail
-from blocks import (blockScheduling, blockSchedulingRobust,
-                    blockPlanning, blockPlanningRobust)
+from stn.deg import degradationModel, calc_p_fail
+from stn.blocks import (blockScheduling, blockSchedulingRobust,
+                        blockPlanning, blockPlanningRobust)
 
 
 class stnModel(object):

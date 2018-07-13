@@ -1,0 +1,9 @@
+Ts:  168
+dTs: 3
+N:   2
+stn:  data/p2.dat
+rdir: /home/jw3617/STN/results
+max: {S4: 2200}
+min: {S4: 200}
+solverparams: {"timelimit": 60}
+

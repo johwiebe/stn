@@ -5,7 +5,6 @@
 import sys
 import yaml
 import dill
-sys.path.append('../STN/modules')
 
 from stn import stnModel, stnModelRobust # noqa
 
