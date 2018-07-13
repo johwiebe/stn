@@ -91,5 +91,5 @@ stn.ijkdata('Separation', 'Still', 'Slow', 15, 2, 0.27*2)
 stn.ijkdata('Separation', 'Still', 'Normal', 9, 5, 0.27*5)
 stn.ijkdata('Separation', 'Still', 'Fast', 6, 6, 0.27*6)
 
-with open("../data/biondiM.dat", "wb") as dill_file:
+with open("../data/p1.dat", "wb") as dill_file:
     dill.dump(stn, dill_file)
