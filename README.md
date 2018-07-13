@@ -4,7 +4,7 @@ Implementation of the State-Task-Network (STN) [Kondili et al. 1993] with
 degradation of equipment. This code can be used to replicate the results in [Wiebe et al. 2018].
 
 ## Credit
-This implementation is based on the [STN-Scheduler](https://github.com/jckantor/STN-Scheduler) by Jeffrey Kantor.
+This implementation is based on the [STN-Scheduler](https://github.com/jckantor/STN-Scheduler) by Jeffrey Kantor (c) 2017.
 
 ## Dependencies
 
@@ -16,9 +16,31 @@ This implementation is based on the [STN-Scheduler](https://github.com/jckantor/
 
 #### lhs.py
 Generate data for logistic regression by solving short-term scheduling model
-repeatedly for different demands. Use
+repeatedly for different demands:
 ```
-python lhs.py runs/test_lhs.py
+python lhs.py runs/test_lhs.yaml
+```
+where `runs/test_lhs.yaml` is a [config file]().
+
+#### logreg.py
+Train logistic regression for Markov-chain or frequency approach.
+
+#### rolling.py
+Solve model using rolling horizon:
+```
+python rolling runs/test_det.yaml
+```
+
+#### mc.py
+Solve model using Markov-chain or frequency approach:
+```
+python mc.py runs/test_mc.yaml
+```
+
+#### bo.py
+Optimize uncertainty set size using Bayesian Optimization:
+```
+python bo.py runs/test_bo.yaml prefix_for_file_names
 ```
 
 ## References
