@@ -1,7 +1,7 @@
 # Configuration files
 
 Instances of the STN model can be specified using `.yaml` configuration files.
-The folling parameters can be used:
+The following parameters can be used:
 
 | Parameter       | Description                                                                         | Scripts           |
 | --------------- | ----------------------------------------------------------------------------------- | ----------------- |
@@ -21,6 +21,6 @@ The folling parameters can be used:
 | alphas          | List of alpha values (uncertainty set size) for which to solve                      | rolling.py, mc.py |
 | periods         | Dictionary: {rolling: # of rolling horizon periods, eval: # of periods to evaluate) | rolling.py        |
 | periods         | # of periods to evaluate                                                            | mc.py             |
-| freq            | True: Use frequency approach if eval > rolling, False: MC approach                  | rolling.py, mc.py |
+| freq            | True: Use frequency approach (if eval > rolling), False: MC approach                  | rolling.py, mc.py |
 | robust          | True: solve robust model, False: solve deterministic approximation                  | rolling.py, bo.py |
 | ccm             | Cost of corrective maintenance for each unit                                        | bo.py             |
