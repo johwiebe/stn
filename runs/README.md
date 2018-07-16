@@ -1,7 +1,7 @@
 # Configuration files
 
 Instances of the STN model can be specified using `.yaml` configuration files.
-The folling parameters can be used:
+The following parameters can be used:
 
 | Parameter       | Description                                                                         | Scripts           |
 | --------------- | ----------------------------------------------------------------------------------- | ----------------- |
