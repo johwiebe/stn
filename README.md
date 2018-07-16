@@ -20,7 +20,7 @@ repeatedly for different demands:
 ```
 python lhs.py runs/test_lhs.yaml
 ```
-where `runs/test_lhs.yaml` is a [config file]().
+where `runs/test_lhs.yaml` is a [config file](runs#configuration-files).
 
 #### logreg.py
 Train logistic regression for Markov-chain or frequency approach.
