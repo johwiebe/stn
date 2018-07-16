@@ -3,9 +3,9 @@ dTs: 3
 Tp: 4032
 dTp: 168
 periods: 12
-stn:  ../data/p2.dat
-TP: ../data/p2freq.pkl
-rdir: /home/jw3617/STN/results_p2/mc
+stn:  data/p2.dat
+TP: data/p2mc.pkl
+rdir: results/p2/mc
 prfx: high_
 solverparams: {"timelimit": 120}
 S4: [2002.3619570650026, 2141.8803390745275, 1668.939814545289, 1977.4612263019687,

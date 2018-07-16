@@ -2,10 +2,9 @@ Ts:  168
 dTs: 3
 Tp: 4032
 dTp: 168
-stn:  ../data/p2.dat
-TP: ../data/p2freq.pkl
-rdir: /home/jw3617/STN/results_p2/mc
-prfx: avg_
+stn:  data/p2.dat
+TP: data/p2mc.pkl
+rdir: results/p2/mc
 solverparams: {"timelimit": 120}
 periods: 12
 S4: [1167.7658512410426, 1110.9462071087246, 1087.209639862513, 906.664090906938,

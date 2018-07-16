@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Reevaluate probability of failure for existing schedules.
+"""
 
 import sys
 import pandas as pd

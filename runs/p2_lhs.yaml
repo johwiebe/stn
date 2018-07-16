@@ -1,8 +1,8 @@
 Ts:  168
 dTs: 3
 N:   200
-stn:  ../data/p2.dat
-rdir: /home/jw3617/STN/results_p2/lhs
+stn:  data/p2.dat
+rdir: results/p2/lhs
 max: {S4: 2200}
 min: {S4: 200}
 solverparams: {"timelimit": 60}

@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Scheduling horizon of STN model with degradation.
-
-This module implements the scheduling horizon of the STN model with degradation
-by Biondi et al 2017.
-
-The implementation of the STN is based on the implementation by Jeffrey Kantor
-2017 (https://github.com/jckantor/STN-Scheduler)
-
+"""
+Pyomo block for the scheduling and planning components of the STN model.
+Each block can be solved independently.
 """
 
 import pyomo.environ as pyomo

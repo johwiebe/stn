@@ -4,7 +4,7 @@ Tp: 4032
 dTp: 168
 stn:  data/biondiM.dat
 TP: data/biondi4TP.pkl
-rdir: /home/jw3617/STN/results
+rdir: results/det
 prfx: avg41_
 solverparams: {"timelimit": 20, "mipgap": 0.02}
 Product_1: [150, 88, 125, 67, 166, 203, 90, 224,

@@ -2,10 +2,10 @@ Ts: 168
 dTs: 3
 Tp: 4032
 dTp: 168
-stn:  ../data/biondiM.dat
-TP: ../data/biondi4TP.pkl
-rdir: /home/jw3617/STN/results_biondi/rob
-prfx: avg_
+stn:  data/p1.dat
+TP: data/p1mc.pkl
+rdir: results/p1/det
+prfx: 1period_
 solverparams: {"timelimit": 120, "mipgap": 0.02}
 Product_1: [150, 88, 125, 67, 166, 203, 90, 224,
             174, 126, 66, 119, 234, 64,
@@ -13,6 +13,9 @@ Product_1: [150, 88, 125, 67, 166, 203, 90, 224,
 Product_2: [200, 150, 197, 296, 191, 193, 214,
             294, 247, 313, 226, 121, 197,
             242, 220, 342, 355, 320, 335, 298, 252, 222, 324, 337]
-alphas: [0.41]
-robust: True
-periods: 12
+alphas: [
+  0.05, 0.08, 0.11, 0.14, 0.17, 0.2, 0.23, 0.26, 0.29, 0.32, 0.35,
+  0.38, 0.41, 0.44, 0.47,
+  0.5]
+robust: False
+periods: {"rolling": 1, "eval": 12}

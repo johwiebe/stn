@@ -8,17 +8,18 @@ import dill
 
 from stn import stnModel, stnModelRobust # noqa
 
-
+# Load config file
 with open(sys.argv[1], "r") as f:
     y = yaml.load(f)
 
-# time horizons
+# Time horizons
 TIMEp = range(0, y["Tp"], y["dTp"])
 
+# Solve for each alpha
 for n, q in enumerate(y["alphas"]):
     with open(y["stn"], "rb") as dill_file:
         stn = dill.load(dill_file)
-
+    # Initialize model
     if y["robust"]:
         model = stnModelRobust(stn)
     else:
@@ -26,8 +27,7 @@ for n, q in enumerate(y["alphas"]):
     for i, t in enumerate(TIMEp):
         for p in stn.products:
             model.demand(p, t, y[p][i])
-
-# build and solve model
+    # Solve model
     model.solve([y["Ts"], y["dTs"], y["Tp"], y["dTp"]],
                 solver="cplex",
                 objective="terminal",
@@ -39,4 +39,5 @@ for n, q in enumerate(y["alphas"]):
                 trace=True,
                 solverparams=y["solverparams"],
                 tindexed=False)
+    # Evaluate
     model.eval(periods=y["periods"]["eval"], TP=y["TP"])

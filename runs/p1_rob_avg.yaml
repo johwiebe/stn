@@ -1,18 +1,18 @@
-Ts:  168
+Ts: 168
 dTs: 3
 Tp: 4032
 dTp: 168
-stn:  ../data/biondiM.dat
-TP: ../data/biondi4TP.pkl
-rdir: /home/jw3617/STN/results_biondi/bo
+stn:  data/p1.dat
+TP: data/p1mc.pkl
+rdir: results/p1/rob
 prfx: avg_
-solverparams: {"timelimit": 180}
+solverparams: {"timelimit": 120, "mipgap": 0.02}
 Product_1: [150, 88, 125, 67, 166, 203, 90, 224,
             174, 126, 66, 119, 234, 64,
             103, 77, 132, 186, 174, 239, 124, 194, 91, 228]
 Product_2: [200, 150, 197, 296, 191, 193, 214,
             294, 247, 313, 226, 121, 197,
             242, 220, 342, 355, 320, 335, 298, 252, 222, 324, 337]
-ccm: {"Reactor_1": 3000, "Reactor_2": 3000, "Heater": 2000, "Still": 1500}
-robust: False
-periods: 24
+alphas: [0.41]
+robust: True
+periods: 12

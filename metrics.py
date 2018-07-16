@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 Calculate performance metrics logistic regression.
+    rdir: directory with results
+    stn: STN structure data file
 """
 
 import dill
@@ -13,8 +15,17 @@ import stn.deg as deg  # noqa
 
 
 def calc_metrics(rdir, stn, scenario, bound, j):
+    """
+    Calculate metrics.
+        rdir: results directory
+        stn: stn structure
+        scenario: demand scenario
+        bound: mc (Markov-chain) or freq (Frequency)
+        j: unit
+    """
     fname = {"mc": "_mc_results.pkl", "freq": "_freq_results.pkl"}
     print(rdir+"/det/"+scenario+"_results.pkl")
+    # Load results
     with open(rdir+"/det/"+scenario+"_results.pkl", "rb") as f:
         det = dill.load(f)
         det = det.rename(index=str, columns={"ID": "id",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
-Deterministic model of STN with degradation. Based on Biondi et al 2017.
+Combined scheduling and planning models (deterministic and robust).
 '''
 import pyomo.environ as pyomo
 from pyomo.opt import SolverStatus, TerminationCondition
