@@ -7,7 +7,7 @@ The folling parameters can be used:
 | --------------- | ----------------------------------------------------------------------------------- | ----------------- |
 | Ts              | Length scheduling horizon                                                           | all               |
 | dTs             | Time step scheduling horizon                                                        | all               |
-| stn             | Data file with [stn structure](../instances/README.md)                              | all               |
+| stn             | Data file with [stn structure](../instances#instances)                              | all               |
 | rdir            | Path to result directory                                                            | all               |
 | solverparams    | Dictionary of solver parameters                                                     | all               |
 | max             | Dictionary with maximum value for each product demand                               | lhs.py            |
