@@ -3,6 +3,8 @@
 Implementation of the State-Task-Network (STN) [Kondili et al. 1993] with
 degradation of equipment. This code can be used to replicate the results in [Wiebe et al. 2018].
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.1313718.svg)](https://doi.org/10.5281/zenodo.1313718)
+
 ## Credit
 This implementation is based on the [STN-Scheduler](https://github.com/jckantor/STN-Scheduler) by Jeffrey Kantor (c) 2017.
 
