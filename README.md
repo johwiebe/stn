@@ -1,7 +1,7 @@
 # STN with degradation
 
 Implementation of the State-Task-Network (STN) [Kondili et al. 1993] with
-degradation of equipment. This code can be used to replicate the results in [Wiebe et al. 2018].
+degradation of equipment. This code can be used to replicate the results in [Wiebe et al. 2018] available at [arXiv:1810.09289](https://arxiv.org/abs/1810.09289).
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.1313718.svg)](https://doi.org/10.5281/zenodo.1313718)
 
@@ -49,4 +49,4 @@ python bo.py runs/test_bo.yaml prefix_for_file_names
 Kondili, E.; Pantelides, C.; Sargent, R. A general algorithm for short-term scheduling of batch operations - I. MILP formulation. Computers & Chemical Engineering 1993, 17, 211227.
 
 Wiebe, J.; Cecilio, I.; Misener, R. Robust optimization of processes with
-degrading equipment. 2018 (Submitted).
+degrading equipment. [arXiv:1810.09289](https://arxiv.org/abs/1810.09289). 2018 (Accepted).
